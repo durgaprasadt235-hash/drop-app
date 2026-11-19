@@ -20,7 +20,7 @@ import type { FollowRequestItem, RoomIdentity, UserSettings } from '../lib/api';
 import PostCard from './PostCard';
 import { filterCss } from '../lib/filters';
 import {
-  IconCheck, IconClose, IconDrop, IconFilm, IconGear, IconGrid, IconLock,
+  IconCheck, IconClose, IconDrop, IconFilm, IconGear, IconGrid, IconImage, IconLock,
   IconLocationPin, IconMask, IconPresenceDot, IconProfile, IconSave,
 } from './icons';
 
@@ -32,9 +32,25 @@ function initials(name: string): string {
   return (name.trim()[0] ?? '?').toUpperCase();
 }
 
-function Avatar({ user, size }: { user: { displayName: string; avatarUrl?: string | null }; size: number }) {
+/* Avatar: when `size` is given, it sets an inline width/height (used by
+   list rows, sheets and the Edit Profile preview). When `size` is omitted,
+   no inline size is set and the avatar is CSS-driven — the profile header
+   relies on this so .profile-page .profile-avatar-wrap .avatar in
+   index.css (76px mobile / 80px desktop) governs it. The <img> branch
+   gets className="avatar" in that case so the same CSS rule sizes it. */
+function Avatar({ user, size }: { user: { displayName: string; avatarUrl?: string | null }; size?: number }) {
   if (user.avatarUrl) {
+    if (size === undefined) {
+      return <img src={user.avatarUrl} alt="" className="avatar" style={{ borderRadius: '50%', objectFit: 'cover' }} />;
+    }
     return <img src={user.avatarUrl} alt="" style={{ width: size, height: size, borderRadius: '50%', objectFit: 'cover' }} />;
+  }
+  if (size === undefined) {
+    return (
+      <span className="avatar">
+        {initials(user.displayName)}
+      </span>
+    );
   }
   return (
     <span className="avatar" style={{ width: size, height: size, fontSize: size / 3 }}>
@@ -192,22 +208,35 @@ export function ProfilePage(props: {
       <div className="profile-cover">
         {profile.coverUrl ? <img src={profile.coverUrl} alt="" /> : <span className="muted">No cover photo yet</span>}
       </div>
-      <div style={{ padding: '0 12px' }}>
+      {/* Profile info: horizontal padding is CSS-driven
+          (.profile-page > div > div:nth-child(2) in index.css:
+          12px mobile / 16px desktop). */}
+      <div>
         <div className="profile-avatar-wrap">
-          <Avatar user={profile} size={88} />
-          {isOwner && (
-            <label className="ghost" style={{ cursor: 'pointer', fontSize: 13 }}>
-              Change photo
-              <input
-                type="file" accept="image/jpeg,image/png,image/webp" hidden
-                onChange={async (e) => {
-                  const f = e.target.files?.[0];
-                  if (!f) return;
-                  try { await uploadProfilePhoto('avatar', f); setNotice('Photo updated.'); props.onRefresh(); } catch (err) { setNotice(err instanceof Error ? err.message : 'Upload failed.'); }
+          <span style={{ position: 'relative', display: 'inline-block', lineHeight: 0 }}>
+            {/* No size prop: the avatar is CSS-driven (76px mobile /
+                80px desktop via .profile-avatar-wrap .avatar). */}
+            <Avatar user={profile} />
+            {isOwner && (
+              <button
+                type="button"
+                className="ghost"
+                aria-label="Edit profile"
+                title="Edit profile"
+                onClick={props.onEdit}
+                style={{
+                  position: 'absolute', right: 0, bottom: 0,
+                  width: 28, height: 28, minWidth: 28, minHeight: 28,
+                  borderRadius: '50%', padding: 0,
+                  display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                  background: 'var(--surface)', border: '1px solid var(--border)',
+                  cursor: 'pointer',
                 }}
-              />
-            </label>
-          )}
+              >
+                <IconImage size={14} />
+              </button>
+            )}
+          </span>
         </div>
         <h2 style={{ margin: '8px 0 0' }}>{profile.displayName}</h2>
         <p className="muted" style={{ margin: '2px 0' }}>@{profile.username}{profile.isPrivate ? <> · <IconLock size={13} /> Private</> : ''}</p>
@@ -216,7 +245,7 @@ export function ProfilePage(props: {
         {(profile.links ?? []).map((l) => (
           <p key={l.url} style={{ margin: '2px 0' }}><a href={l.url} target="_blank" rel="noreferrer">{l.label}</a></p>
         ))}
-        {profile.location && <p className="muted"><IconLocationPin size={14} /> {profile.location}</p>}
+        {profile.location && <p className="muted profile-location"><IconLocationPin size={14} /> {profile.location}</p>}
         {notice && <div className="notice">{notice}</div>}
 
         {/* Stats — real server counts, tap opens the real list.
@@ -339,9 +368,9 @@ export function ProfilePage(props: {
             </div>
             {tab === 'posts' && (
               posts.length === 0 ? (
-                <div style={{ textAlign: 'center', padding: '24px 0' }}>
-                  <p className="muted">No posts yet.</p>
-                  {isOwner && <button className="primary" onClick={props.onCreatePost}>Create your first post</button>}
+                <div style={{ textAlign: 'center', padding: '12px 0' }}>
+                  <p className="muted" style={{ fontSize: 12 }}>No posts yet.</p>
+                  {isOwner && <button className="ghost" style={{ height: 34, fontSize: 12 }} onClick={props.onCreatePost}>Create Post</button>}
                 </div>
               ) : (
                 <div className="profile-grid">
@@ -359,9 +388,9 @@ export function ProfilePage(props: {
             )}
             {tab === 'reels' && (
               reels.length === 0 ? (
-                <div style={{ textAlign: 'center', padding: '24px 0' }}>
-                  <p className="muted">No Reels yet.</p>
-                  {isOwner && <p className="muted">Create one from Discover → Reels.</p>}
+                <div style={{ textAlign: 'center', padding: '12px 0' }}>
+                  <p className="muted" style={{ fontSize: 12 }}>No Reels yet.</p>
+                  {isOwner && <button className="ghost" style={{ height: 34, fontSize: 12 }} onClick={props.onCreatePost}>Create Post</button>}
                 </div>
               ) : (
                 <div className="profile-grid">
@@ -375,9 +404,9 @@ export function ProfilePage(props: {
             )}
             {tab === 'drops' && (
               drops.length === 0 ? (
-                <div style={{ textAlign: 'center', padding: '24px 0' }}>
-                  <p className="muted">No Drops yet.</p>
-                  {isOwner && <p className="muted">Create one from the Hub (+ Drop).</p>}
+                <div style={{ textAlign: 'center', padding: '12px 0' }}>
+                  <p className="muted" style={{ fontSize: 12 }}>No Drops yet.</p>
+                  {isOwner && <button className="ghost" style={{ height: 34, fontSize: 12 }} onClick={props.onCreatePost}>Create Post</button>}
                 </div>
               ) : (
                 <div className="profile-grid">
@@ -391,7 +420,10 @@ export function ProfilePage(props: {
             )}
             {tab === 'saved' && (
               saved.length === 0 ? (
-                <p className="muted" style={{ textAlign: 'center', padding: '24px 0' }}>Nothing saved yet.</p>
+                <div style={{ textAlign: 'center', padding: '12px 0' }}>
+                  <p className="muted" style={{ fontSize: 12 }}>Nothing saved yet.</p>
+                  {isOwner && <button className="ghost" style={{ height: 34, fontSize: 12 }} onClick={props.onCreatePost}>Create Post</button>}
+                </div>
               ) : (
                 <div className="profile-grid">
                   {saved.map((p) => (
@@ -464,7 +496,6 @@ export function ProfilePage(props: {
             </div>
           </div>
         )}
-        <p className="muted" style={{ marginTop: 16 }}>Signed in as {me.displayName} (@{me.username})</p>
       </div>
     </div>
   );

@@ -34,6 +34,7 @@ const NAV: { id: View; label: string; Icon: ComponentType<IconProps> }[] = [
   { id: 'hub', label: 'DROP Hub', Icon: IconDrop },
   { id: 'search', label: 'Search', Icon: IconSearch },
   { id: 'profile', label: 'Profile', Icon: IconProfile },
+  { id: 'messages', label: 'Messages', Icon: IconMessages },
 ];
 
 export default function App() {
@@ -76,26 +77,18 @@ export default function App() {
   const googleBtnRef = useRef<HTMLDivElement | null>(null);
   const linkGoogleBtnRef = useRef<HTMLDivElement | null>(null);
 
-  // Approved dock — fixed capsule on mobile/tablet, slim left rail on
-  // desktop (≥1025px). The old floating-ball form is gone entirely:
+  // Approved dock — one floating capsule on ALL breakpoints (the desktop
+  // left rail is gone). The old floating-ball form is gone entirely:
   // no drag-anywhere ball, no position key, no idle auto-collapse.
   // The capsule side persists in localStorage ('left' | 'right').
   const [dockSide, setDockSide] = useState<'left' | 'right'>(() => {
     try { return localStorage.getItem('drop-dock-side') === 'left' ? 'left' : 'right'; } catch { return 'right'; }
   });
-  const [isDesktop, setIsDesktop] = useState(() => window.matchMedia('(min-width: 1025px)').matches);
   const [magnified, setMagnified] = useState<number | null>(null);
   const [hovered, setHovered] = useState<number | null>(null);
   const pressRef = useRef<{ index: number; startX: number; startY: number; longPressed: boolean; dragging: boolean } | null>(null);
   const longPressTimer = useRef<number | null>(null);
   const clickGuard = useRef(false);
-
-  useEffect(() => {
-    const mq = window.matchMedia('(min-width: 1025px)');
-    const onChange = () => setIsDesktop(mq.matches);
-    mq.addEventListener('change', onChange);
-    return () => mq.removeEventListener('change', onChange);
-  }, []);
 
   useEffect(() => {
     document.body.classList.toggle('dark', dark);
@@ -319,7 +312,7 @@ export default function App() {
     return base;
   };
 
-  const renderDockButtons = (alwaysShowLabel: boolean) => NAV.map((n, i) => (
+  const renderDockButtons = () => NAV.map((n, i) => (
     <button
       key={n.id}
       type="button"
@@ -336,9 +329,9 @@ export default function App() {
       onMouseLeave={() => setHovered((h) => (h === i ? null : h))}
     >
       <span className="dock-icon" style={iconScale(i)}>
-        <n.Icon size={22} filled={view === n.id} />
+        <n.Icon size={20} filled={view === n.id} />
       </span>
-      {(alwaysShowLabel || magnified === i || hovered === i) && <span className="dock-label">{n.label}</span>}
+      {(magnified === i || hovered === i) && <span className="dock-label">{n.label}</span>}
     </button>
   ));
 
@@ -401,7 +394,7 @@ export default function App() {
     <div className={view === 'home' ? 'app home' : 'app'}>
       <header className="header">
         <div className="header-side">
-          <button className="ghost" onClick={() => setView('clubrooms')}><IconGrid size={22} />Clubs</button>
+          <button className="ghost clubs-btn" onClick={() => setView('clubrooms')}><IconGrid size={20} />Clubs</button>
         </div>
         <div className="logo" onClick={() => setView('home')}>
           <span className="logo-mark"><LogoDrop size={28} /></span>
@@ -409,9 +402,8 @@ export default function App() {
         </div>
         <div className="header-side">
           <button className="ghost" onClick={() => setView('notifications')} aria-label="Notifications">
-            <span className="bell-wrap"><IconBell size={22} />{unread > 0 && <span className="bell-dot" aria-hidden="true" />}</span>
+            <span className="bell-wrap"><IconBell size={20} />{unread > 0 && <span className="bell-dot" aria-hidden="true" />}</span>
           </button>
-          <button className="ghost" onClick={() => setView('messages')} aria-label="Messages"><IconMessages size={22} /></button>
           <button className="ghost" onClick={() => setDark((d) => !d)}>{dark ? 'White' : 'Dark'}</button>
         </div>
       </header>
@@ -419,9 +411,15 @@ export default function App() {
       {view === 'home' && (
         <>
           <div className="stories">
-            <button className="story-circle yours" onClick={() => setEditing('story')}><IconPlus size={28} /></button>
+            <div className="story-item">
+              <button className="story-circle yours" onClick={() => setEditing('story')} aria-label="Add story"><IconPlus size={24} /></button>
+              <span className="story-username">You</span>
+            </div>
             {stories.map((s, i) => (
-              <button key={s.id} className="story-circle" onClick={() => setViewerIndex(i)}>{(s.author?.displayName ?? 'S')[0]}</button>
+              <div className="story-item" key={s.id}>
+                <button className="story-circle" onClick={() => setViewerIndex(i)} aria-label={`View ${s.author?.displayName ?? 'story'}`}>{(s.author?.displayName ?? 'S')[0]}</button>
+                <span className="story-username">{s.author?.displayName ?? 'Story'}</span>
+              </div>
             ))}
           </div>
 
@@ -433,20 +431,23 @@ export default function App() {
               ['trending', 'Trending', IconFire, true],
             ] as const).map(([id, label, PillIcon, filled]) => (
               <button key={id} className={`pill-item${shortcut === id ? ' active' : ''}`} onClick={() => setShortcut(id)}>
-                <span className="pill-icon"><PillIcon size={20} filled={filled} /></span>
+                <span className="pill-icon"><PillIcon size={16} filled={filled} /></span>
                 <span className="pill-label">{label}</span>
               </button>
             ))}
-            <button type="button" className="pill-chevron" aria-label="More Drops" onClick={() => setView('hub')}><IconChevronRight size={20} /></button>
+            <button type="button" className="pill-chevron" aria-label="More Drops" onClick={() => setView('hub')}><IconChevronRight size={16} /></button>
           </div>
 
-          <div style={{ display: 'flex', gap: 8, padding: '0 12px' }}>
-            <button className="primary" onClick={() => setEditing('post')}>+ Post</button>
-            <button className="ghost" onClick={() => setEditing('story')}>+ Story</button>
-            <button className="ghost" onClick={() => setView('hub')}>+ Drop</button>
+          <div className="create-post-row">
+            <button className="primary create-post-btn" onClick={() => setEditing('post')}>+ Create Post</button>
           </div>
 
-          {visibleFeed.length === 0 && <p className="muted" style={{ padding: 16 }}>No posts yet — create the first one.</p>}
+          {visibleFeed.length === 0 && (
+            <div className="home-empty">
+              <p>No posts yet — create the first one.</p>
+              <button className="primary" onClick={() => setEditing('post')}>Create Post</button>
+            </div>
+          )}
           {visibleFeed.map((p) => (
             <PostCard
               key={p.id} post={p} following={following.has(p.authorId)}
@@ -501,7 +502,7 @@ export default function App() {
         </div>
       )}
       {view === 'profile' && (
-        <>
+        <div className="profile-page">
           {profileError ? (
             <div style={{ padding: 12 }}>
               <div className="notice">{profileError}</div>
@@ -541,7 +542,7 @@ export default function App() {
               )}
             </>
           )}
-        </>
+        </div>
       )}
       {view === 'edit-profile' && (
         <EditProfilePage
@@ -586,20 +587,13 @@ export default function App() {
         <StoryViewer stories={stories} index={viewerIndex} onClose={() => setViewerIndex(null)} onIndex={setViewerIndex} me={me} />
       )}
 
-      {/* Approved dock — global on every signed-in page. Fixed capsule
-          below desktop widths; slim left rail at ≥1025px (no floating
-          element over content on desktop). Full-screen Story/Blast
-          viewers (z-index 100) still cover the dock by design. */}
-      {!isDesktop ? (
-        <div className={dockSide === 'left' ? 'dock-panel dock-left' : 'dock-panel'} style={dockSide === 'left' ? { left: 12, right: 'auto' } : undefined}>
-          {renderDockButtons(false)}
-        </div>
-      ) : (
-        <nav className="dock-rail" aria-label="Navigation">
-          <div className="rail-logo" aria-hidden="true"><LogoDrop size={40} /></div>
-          {renderDockButtons(true)}
-        </nav>
-      )}
+      {/* Approved dock — global on every signed-in page, all breakpoints:
+          one floating 52x288px capsule, 6 destinations, no reserved
+          layout space, no bottom nav, no desktop rail. Full-screen
+          Story/Blast viewers (z-index 100) still cover the dock by design. */}
+      <div className={dockSide === 'left' ? 'dock-panel dock-left' : 'dock-panel'} style={dockSide === 'left' ? { left: 12, right: 'auto' } : undefined}>
+        {renderDockButtons()}
+      </div>
     </div>
   );
 }

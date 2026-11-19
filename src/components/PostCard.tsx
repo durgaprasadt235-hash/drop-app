@@ -112,7 +112,7 @@ export default function PostCard({ post, onFollow, following }: {
             onError={() => setMediaFailed(true)}
           />
         ) : (
-          <div className="post-text-panel" aria-label={post.caption ? `Post by ${authorName}` : undefined} />
+          <div className="post-text-panel" style={{ minHeight: 220 }} aria-label={post.caption ? `Post by ${authorName}` : undefined} />
         )}
         {showFire && <span style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', pointerEvents: 'none' }}><IconFire size={64} filled /></span>}
         {extras.poll && <div style={{ position: 'absolute', top: 8, left: 8, background: 'rgba(0,0,0,0.6)', color: '#fff', padding: '6px 10px', borderRadius: 8 }}>{extras.poll.question}</div>}
@@ -120,18 +120,18 @@ export default function PostCard({ post, onFollow, following }: {
         <div className="post-overlay">
           <div className="post-creator-row">
             <span className="avatar">{(post.author?.displayName ?? 'D')[0]}</span>
-            <strong>{authorName}</strong>
-            {time && <span className="post-time">· {time}</span>}
+            <strong className="post-username" style={{ fontSize: 13, fontWeight: 600, lineHeight: 1.4 }}>{authorName}</strong>
+            {time && <span className="post-time" style={{ fontSize: 12, lineHeight: 1.4, color: 'rgba(255, 255, 255, 0.75)' }}>· {time}</span>}
             <button className="ghost" onClick={() => onFollow(post.authorId)}>{following ? 'Following' : 'Follow'}</button>
           </div>
-          <p className="post-caption">{post.caption}</p>
+          <p className="post-caption" style={{ fontSize: 13, lineHeight: 1.4 }}>{post.caption}</p>
           <div className="post-engagement engagement">
-            <button className={fired ? 'fire-on' : ''} onClick={fire} aria-label="Fire"><IconFire size={22} filled={fired} />{hideLikeCounts ? '' : ` ${count}`}</button>
-            <button onClick={openComments} aria-label="Comment"><IconComment size={22} />{` ${post.commentCount}`}</button>
-            <button aria-label="Reshare"><IconShare size={22} /></button>
-            <button aria-label="Send"><IconSend size={22} /></button>
-            <button aria-label="Save"><IconSave size={22} /></button>
-            <button aria-label="More"><IconMore size={22} /></button>
+            <button className={fired ? 'fire-on' : ''} style={{ fontSize: 12, fontWeight: 600 }} onClick={fire} aria-label="Fire"><IconFire size={22} filled={fired} />{hideLikeCounts ? '' : ` ${count}`}</button>
+            <button style={{ fontSize: 12, fontWeight: 600 }} onClick={openComments} aria-label="Comment"><IconComment size={22} />{` ${post.commentCount}`}</button>
+            <button style={{ fontSize: 12, fontWeight: 600 }} aria-label="Reshare"><IconShare size={22} /></button>
+            <button style={{ fontSize: 12, fontWeight: 600 }} aria-label="Send"><IconSend size={22} /></button>
+            <button style={{ fontSize: 12, fontWeight: 600 }} aria-label="Save"><IconSave size={22} /></button>
+            <button style={{ fontSize: 12, fontWeight: 600 }} aria-label="More"><IconMore size={22} /></button>
           </div>
         </div>
       </div>

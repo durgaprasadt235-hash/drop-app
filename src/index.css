@@ -12,11 +12,11 @@
   --drop-ring: conic-gradient(from 135deg, #ff2ea6, #7b2ff7, #a855f7, #ff2ea6);
   --drop-red: #ff3b30; /* notification dot */
   /* Restrained palette — light theme (default) */
-  --ink: #0b1327;
+  --ink: #111827;
   --paper: #ffffff;
-  --secondary: #5b6472;
+  --secondary: #667085;
   --hairline: #e7e8eb;
-  --surface: #f7f7f8;
+  --surface: #f5f6fa;
   --accent: #d92d5e; /* DROP rose — Fire / active states only */
   --fire: #d92d5e;
   /* --accent2 is kept as an alias of the rose so the two inline
@@ -27,14 +27,14 @@
 
   /* Legacy variable names used by components — all point at the new palette */
   --bg: #ffffff;
-  --text: #0b1327;
-  --muted: #5b6472;
+  --text: #111827;
+  --muted: #667085;
   --border: #e7e8eb;
 
   /* Dark theme tokens (structure unchanged) */
-  --dark-bg: #0b1327;
+  --dark-bg: #080d20;
   --dark-text: #ffffff;
-  --dark-muted: #a8b3c9;
+  --dark-muted: #a5adc2;
   --dark-border: #1f2a44;
 
   /* Spacing scale — 4px base */
@@ -66,18 +66,18 @@ p { font-size: 15px; line-height: 22px; font-weight: 400; margin: 0 0 var(--spac
 
 /* Display / wordmark */
 h1, .logo {
-  font-size: 24px;
-  line-height: 28px;
-  font-weight: 700;
-  letter-spacing: 0.14em;
+  font-size: 22px;
+  line-height: 26px;
+  font-weight: 750;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
   margin: 0 0 var(--space-2);
 }
 
-/* Screen title */
+/* Screen title — directive scale (the old 20px scale is superseded) */
 h2 {
-  font-size: 20px;
-  line-height: 26px;
+  font-size: 17px;
+  line-height: 24px;
   font-weight: 650;
   margin: 0 0 var(--space-2);
 }
@@ -100,13 +100,13 @@ h3 {
 .caption { color: var(--muted); font-size: 12px; line-height: 16px; font-weight: 400; }
 
 /* Stat number */
-.stat-number { font-size: 17px; line-height: 22px; font-weight: 650; }
+.stat-number { font-size: 15px; line-height: 20px; font-weight: 650; }
 
 /* Buttons / labels */
 button {
   font-family: inherit;
-  font-size: 14px;
-  line-height: 20px;
+  font-size: 12px;
+  line-height: 18px;
   font-weight: 600;
   cursor: pointer;
   min-height: 44px;
@@ -135,12 +135,14 @@ button.ghost { background: transparent; border: 1px solid var(--border); border-
 .header-side.right { justify-content: flex-end; }
 .header-side:first-child { justify-content: flex-start; }
 .header-side:last-child { justify-content: flex-end; }
+/* Clubs — compact ghost button: 20px grid icon, 12px label. */
+.clubs-btn { display: inline-flex; align-items: center; gap: 6px; padding: 6px 10px; min-height: 36px; font-size: 12px; line-height: 18px; font-weight: 600; }
 /* Logo lockup — gradient droplet mark + Inter 700 letterspaced wordmark. */
 .logo { margin: 0; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px; justify-self: center; }
 .logo span { color: inherit; }
 .logo-mark { flex: 0 0 auto; width: 32px; height: 32px; border-radius: 50%; background: var(--drop-gradient); display: inline-flex; align-items: center; justify-content: center; overflow: hidden; }
 .logo-mark svg { width: 100%; height: 100%; display: block; }
-.logo-text { font-size: 24px; line-height: 28px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; color: inherit; white-space: nowrap; }
+.logo-text { font-size: 22px; line-height: 26px; font-weight: 750; letter-spacing: 0.08em; text-transform: uppercase; color: inherit; white-space: nowrap; }
 /* Header icon buttons (bell, messages, search) — plain round buttons. */
 .icon-btn { background: transparent; border: none; color: inherit; min-width: 44px; min-height: 44px; display: inline-flex; align-items: center; justify-content: center; border-radius: 50%; padding: 0; }
 .bell-wrap { position: relative; display: inline-flex; align-items: center; justify-content: center; }
@@ -149,26 +151,38 @@ button.ghost { background: transparent; border: 1px solid var(--border); border-
 .bell-dot { position: absolute; top: 7px; right: 7px; width: 8px; height: 8px; border-radius: 50%; background: var(--drop-red); border: 1px solid rgba(255, 255, 255, 0.7); pointer-events: none; }
 .stories { display: flex; gap: 12px; overflow-x: auto; padding: 12px 16px; scrollbar-width: none; }
 .stories::-webkit-scrollbar { display: none; }
-/* Story circles — 72px, gradient ring on EVERY circle including the +
+/* Story circles — 54px, gradient ring on EVERY circle including the +
    add circle. Gradient-border technique: the gradient is the border-box
    layer, the inner disc is the padding-box layer, so the ring itself is
    the gradient and the photo/initial shows inside it. */
-.story-circle { flex: 0 0 auto; width: 72px; height: 72px; border-radius: 50%; border: 3px solid transparent; background: linear-gradient(rgba(11, 19, 39, 0.45), rgba(11, 19, 39, 0.45)) padding-box, var(--drop-gradient) border-box; display: flex; align-items: center; justify-content: center; font-size: 24px; color: #fff; }
+.story-item { flex: 0 0 auto; width: 54px; display: flex; flex-direction: column; align-items: center; gap: 4px; min-width: 0; }
+.story-circle { flex: 0 0 auto; width: 54px; height: 54px; border-radius: 50%; border: 3px solid transparent; background: linear-gradient(rgba(8, 13, 32, 0.45), rgba(8, 13, 32, 0.45)) padding-box, var(--drop-gradient) border-box; display: flex; align-items: center; justify-content: center; font-size: 18px; color: #fff; }
+.story-username { font-size: 10px; line-height: 13px; font-weight: 400; color: #fff; text-align: center; max-width: 54px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .story-circle img { width: 100%; height: 100%; object-fit: cover; border-radius: 50%; display: block; }
-.story-circle.yours { border: 3px solid transparent; background: linear-gradient(rgba(11, 19, 39, 0.45), rgba(11, 19, 39, 0.45)) padding-box, var(--drop-gradient) border-box; }
+.story-circle.yours { border: 3px solid transparent; background: linear-gradient(rgba(8, 13, 32, 0.45), rgba(8, 13, 32, 0.45)) padding-box, var(--drop-gradient) border-box; }
 /* Glass shortcut pill — translucent white blur over the photo, icon
    stacked above its label, chevron at the right end. */
-.pill-bar { display: flex; align-items: stretch; height: 64px; background: rgba(255, 255, 255, 0.16); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px); border: 1px solid rgba(255, 255, 255, 0.35); border-radius: 32px; margin: 8px 16px; overflow: hidden; color: #fff; }
+.pill-bar { display: flex; align-items: stretch; height: 46px; background: rgba(255, 255, 255, 0.16); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px); border: 1px solid rgba(255, 255, 255, 0.35); border-radius: 23px; margin: 8px 16px; overflow: hidden; color: #fff; }
 .pill-bar button { flex: 1; border: none; background: transparent; color: #fff; }
 .pill-item { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; padding: 6px 4px; color: #fff; }
 .pill-item + .pill-item { border-left: 1px solid rgba(255, 255, 255, 0.25); }
-.pill-icon { width: 20px; height: 20px; display: flex; align-items: center; justify-content: center; color: #fff; }
-.pill-icon svg { width: 20px; height: 20px; }
-.pill-label { font-size: 13px; line-height: 18px; font-weight: 600; color: #fff; white-space: nowrap; }
+.pill-icon { width: 16px; height: 16px; display: flex; align-items: center; justify-content: center; color: #fff; }
+.pill-icon svg { width: 16px; height: 16px; }
+.pill-label { font-size: 11px; line-height: 15px; font-weight: 550; color: #fff; white-space: nowrap; }
 /* Active shortcut stays legible: a brighter glass, white text. */
 .pill-bar button.active, .pill-item.active { background: rgba(255, 255, 255, 0.28); color: #fff; }
 .pill-chevron { flex: 0 0 auto; display: flex; align-items: center; justify-content: center; padding: 0 14px 0 8px; color: #fff; background: transparent; border: none; border-left: 1px solid rgba(255, 255, 255, 0.25); }
 .card { border-bottom: 1px solid var(--border); border-radius: 12px; padding: 16px; }
+/* Home — one compact Create Post action (replaces the three outlined
+   +Post / +Story / +Drop buttons; Story/Drop creation still live via
+   the story + circle and the Hub). */
+.create-post-row { display: flex; padding: 0 16px; margin: 4px 0 8px; }
+.create-post-btn { min-height: 36px; padding: 8px 16px; font-size: 12px; line-height: 18px; font-weight: 600; border-radius: 9px; }
+/* Home — genuine empty state, centred in the feed, compact text + one
+   small Create Post button. */
+.home-empty { text-align: center; padding: 32px 16px; }
+.home-empty p { font-size: 12px; line-height: 18px; font-weight: 400; color: rgba(255, 255, 255, 0.75); margin: 0 0 12px; }
+.home-empty button { min-height: 34px; padding: 8px 16px; font-size: 12px; line-height: 18px; font-weight: 600; border-radius: 9px; }
 .avatar { width: 40px; height: 40px; border-radius: 50%; background: var(--ink); color: #fff; display: inline-flex; align-items: center; justify-content: center; font-weight: 700; }
 .post-media { width: 100%; aspect-ratio: 4 / 3; border-radius: 12px; display: flex; align-items: center; justify-content: center; font-size: 48px; background: var(--surface); margin: 10px 0; }
 .engagement { display: flex; gap: 16px; font-size: 20px; align-items: center; }
@@ -182,31 +196,31 @@ button.ghost { background: transparent; border: 1px solid var(--border); border-
 .post-media-img { width: 100%; display: block; object-fit: cover; }
 /* Bottom overlay — dark gradient from transparent to deep navy so the
    white creator row, caption and engagement row stay legible. */
-.post-overlay { position: absolute; left: 0; right: 0; bottom: 0; padding: 56px 16px 16px; background: linear-gradient(to top, rgba(11, 19, 39, 0.85), rgba(11, 19, 39, 0)); color: #fff; }
+.post-overlay { position: absolute; left: 0; right: 0; bottom: 0; padding: 56px 16px 16px; background: linear-gradient(to top, rgba(8, 13, 32, 0.85), rgba(8, 13, 32, 0)); color: #fff; }
 .post-creator-row { display: flex; align-items: center; gap: 10px; color: #fff; }
 .post-creator-row .avatar { border: 2px solid rgba(255, 255, 255, 0.8); flex: 0 0 auto; }
-.post-creator-row .post-username { font-size: 15px; line-height: 22px; font-weight: 650; color: #fff; }
+.post-creator-row .post-username { font-size: 13px; line-height: 1.4; font-weight: 600; color: #fff; }
 .post-creator-row .muted { color: rgba(255, 255, 255, 0.75); }
 /* Follow pill over the photo — outlined glass pill, white text. */
 .post-creator-row button { background: rgba(255, 255, 255, 0.12); border: 1px solid rgba(255, 255, 255, 0.6); color: #fff; border-radius: 999px; padding: 6px 14px; min-height: 32px; font-size: 13px; line-height: 18px; }
-.post-caption { color: #fff; font-size: 15px; line-height: 22px; margin: 8px 0 0; }
+.post-caption { color: #fff; font-size: 13px; line-height: 1.4; margin: 8px 0 0; }
 .post-engagement { display: flex; gap: 16px; align-items: center; margin-top: 12px; color: #fff; }
-.post-engagement button { background: none; border: none; color: #fff; font-size: 15px; line-height: 22px; display: inline-flex; align-items: center; gap: 6px; padding: 0; min-height: 44px; }
+.post-engagement button { background: none; border: none; color: #fff; font-size: 12px; line-height: 22px; font-weight: 600; display: inline-flex; align-items: center; gap: 6px; padding: 0; min-height: 44px; }
 .post-engagement .fire-on { color: var(--fire); }
 /* Text-only posts — an honest solid deep-navy panel, NOT a fake photo
    and NOT a placeholder image. Text displays cleanly at a comfortable
    height. */
-.post-text-panel { background: #0b1327; color: #fff; min-height: 320px; display: flex; align-items: center; justify-content: center; text-align: center; padding: 48px 20px; font-size: 17px; line-height: 26px; font-weight: 500; }
+.post-text-panel { background: #080d20; color: #fff; min-height: 220px; display: flex; align-items: center; justify-content: center; text-align: center; padding: 48px 20px; font-size: 17px; line-height: 26px; font-weight: 500; }
 
 /* ---------- Dock — vertical GLASS pill (global, Home-approved) ---------- */
 .dock-panel {
-  position: fixed; z-index: 50; width: 56px; height: 296px;
+  position: fixed; z-index: 50; width: 52px; height: 288px;
   right: 12px; bottom: calc(20px + env(safe-area-inset-bottom, 0px));
-  border-radius: 28px;
-  background: rgba(11, 19, 39, 0.45);
+  border-radius: 26px;
+  background: rgba(8, 13, 32, 0.45);
   backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
   border: 1px solid rgba(255, 255, 255, 0.25);
-  box-shadow: 0 8px 24px rgba(11, 19, 39, 0.25);
+  box-shadow: 0 8px 24px rgba(8, 13, 32, 0.25);
   display: flex; flex-direction: column; align-items: center; justify-content: space-evenly;
   color: #fff;
 }
@@ -218,40 +232,67 @@ button.ghost { background: transparent; border: 1px solid var(--border); border-
   transform: none;
   width: 44px; height: 44px; min-width: 44px; min-height: 44px;
   border-radius: 50%; border: 2px solid transparent;
-  background: linear-gradient(rgba(11, 19, 39, 0), rgba(11, 19, 39, 0)) padding-box, var(--drop-ring) border-box;
+  background: linear-gradient(rgba(8, 13, 32, 0), rgba(8, 13, 32, 0)) padding-box, var(--drop-ring) border-box;
 }
-.dock-icon { width: 22px; height: 22px; color: #fff; }
+.dock-icon { width: 20px; height: 20px; color: #fff; }
 .dock-panel button.active .dock-icon, .dock-panel .dock-item.active .dock-icon { color: #fff; }
 .dock-badge {
   position: absolute; top: 6px; right: 6px; width: 8px; height: 8px;
-  border-radius: 50%; background: var(--accent); border: 2px solid rgba(11, 19, 39, 0.6);
+  border-radius: 50%; background: var(--accent); border: 2px solid rgba(8, 13, 32, 0.6);
 }
 .dock-label { font-size: 10px; line-height: 12px; font-weight: 600; color: #fff; text-align: center; }
 /* Panel label sits BESIDE its icon (outside the capsule), not beneath
    it: to the left when the capsule is docked right, to the right when
-   docked left. Dark pill so it stays readable over the photo. The
-   desktop rail keeps its beneath-icon label. */
+   docked left. Dark pill so it stays readable over the photo. */
 .dock-panel .dock-label {
   position: absolute; top: 50%; right: calc(100% + 10px); transform: translateY(-50%);
-  white-space: nowrap; background: rgba(11, 19, 39, 0.85); border: 1px solid rgba(255, 255, 255, 0.25);
-  border-radius: 999px; padding: 4px 8px; box-shadow: 0 4px 12px rgba(11, 19, 39, 0.25); z-index: 60; color: #fff;
+  white-space: nowrap; background: rgba(8, 13, 32, 0.85); border: 1px solid rgba(255, 255, 255, 0.25);
+  border-radius: 999px; padding: 4px 8px; box-shadow: 0 4px 12px rgba(8, 13, 32, 0.25); z-index: 60; color: #fff;
 }
 .dock-panel.dock-left .dock-label { right: auto; left: calc(100% + 10px); }
-.dock-rail { display: none; }
-
 /* Page 04 — Profile */
-.profile-cover { width: 100%; height: 170px; background: var(--surface); display: flex; align-items: center; justify-content: center; color: var(--muted); overflow: hidden; }
+/* Profile page wrapper (App.tsx wraps ProfilePage in this): content
+   max-width 900px. The .app column is widened to 900px while a profile
+   is open — see the >=1025px :has() rule below — so the wider wrapper
+   is not clipped by the .app column. */
+.profile-page { max-width: 900px; width: 100%; margin: 0 auto; }
+.profile-cover { width: 100%; height: 140px; background: var(--surface); display: flex; align-items: center; justify-content: center; color: var(--muted); overflow: hidden; }
 .profile-cover img { width: 100%; height: 100%; object-fit: cover; }
-.profile-avatar-wrap { display: flex; align-items: flex-end; gap: 12px; margin-top: -44px; position: relative; z-index: 1; }
+.profile-avatar-wrap { display: flex; align-items: flex-end; gap: 12px; margin-top: -28px; position: relative; z-index: 1; }
+/* Avatar is 76px mobile / 80px desktop, CSS-driven: the profile header
+   Avatar in ProfileViews takes no size prop, so no inline size competes
+   with this rule and no override flag is needed. */
+.profile-page .profile-avatar-wrap .avatar { width: 76px; height: 76px; font-size: 25px; }
 .profile-avatar-wrap .avatar { border: 4px solid var(--bg); }
 body.dark .profile-avatar-wrap .avatar { border-color: var(--dark-bg); }
-.profile-stats { display: flex; margin: 16px 0; }
+.profile-stats { display: flex; margin: 16px 0; gap: 16px; }
 .profile-stats button { flex: 1; background: none; border: none; display: flex; flex-direction: column; align-items: center; gap: 2px; color: inherit; min-height: 44px; }
-.profile-stats button strong { font-size: 17px; line-height: 22px; font-weight: 650; }
-.profile-stats button span { font-size: 13px; line-height: 18px; color: var(--muted); }
+.profile-stats button strong { font-size: 15px; line-height: 20px; font-weight: 650; }
+.profile-stats button span { font-size: 11px; line-height: 15px; color: var(--muted); }
 .profile-tabs { display: flex; border-bottom: 1px solid var(--border); margin: 24px 0 0; }
-.profile-tabs button { flex: 1; background: none; border: none; padding: 12px 4px; color: var(--muted); border-bottom: 2px solid transparent; }
+.profile-tabs button { flex: 1; background: none; border: none; height: 42px; min-height: 42px; padding: 0 4px; color: var(--muted); border-bottom: 2px solid transparent; font-size: 12px; line-height: 18px; font-weight: 550; display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
+.profile-tabs button svg { width: 16px; height: 16px; }
 .profile-tabs button.active { color: var(--accent); border-bottom-color: var(--accent); }
+/* Profile typography (directive sizes). Display name is the h2,
+   username the p directly after it, bio the plain <p>. Location keeps
+   .muted for colour but has its own smaller size (see .profile-location
+   below) — it no longer shares the username size. */
+.profile-page h2 { font-size: 17px; line-height: 24px; font-weight: 650; }
+.profile-page h2 + p.muted { font-size: 12px; line-height: 17px; font-weight: 400; }
+.profile-page p { font-size: 13px; line-height: 19px; font-weight: 400; }
+.profile-page p.muted { font-size: 12px; line-height: 17px; }
+/* Location: one step smaller than the username — 11px mobile,
+   12px desktop (rule below). Higher specificity than .profile-page
+   p.muted so the size wins; colour still comes from .muted. */
+.profile-page p.muted.profile-location { font-size: 11px; line-height: 16px; }
+/* Profile info padding: 12px horizontal mobile (16px desktop, below).
+   The info div carries no inline padding in ProfileViews, so the
+   plain CSS rules apply with no override flag. */
+.profile-page > div > div:nth-child(2) { padding: 0 12px; }
+/* Profile action buttons: 34px high, radius 9px, 12px text. Stats
+   buttons and tab buttons are plain <button>s (no .primary/.ghost
+   class), so they keep their own 44px / 42px sizes. */
+.profile-page button.primary, .profile-page button.ghost { min-height: 34px; padding: 8px 14px; font-size: 12px; line-height: 18px; font-weight: 600; border-radius: 9px; }
 /* Instagram-style 3-column profile grid — every tile is a real record. */
 .profile-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 2px; margin: 8px 0; }
 .profile-tile { aspect-ratio: 1; border: none; padding: 0; overflow: hidden; background: var(--surface); color: var(--text); font-size: 13px; line-height: 18px; font-weight: 600; display: flex; align-items: center; justify-content: center; text-align: center; cursor: pointer; }
@@ -279,12 +320,12 @@ body.dark .notice { background: #3a2f10; }
    The :has(.logo-mark) selectors below are a fallback so the dark
    treatment also attaches as soon as the new logo lockup renders.
    Other screens keep the clean-luxury system untouched. */
-.home { background: #0b1327; }
+.home { background: #080d20; }
 .home .header,
 .header:has(.logo-mark),
 body.dark .home .header,
 body.dark .header:has(.logo-mark) {
-  background: linear-gradient(to bottom, rgba(11, 19, 39, 0.6), rgba(11, 19, 39, 0));
+  background: linear-gradient(to bottom, rgba(8, 13, 32, 0.6), rgba(8, 13, 32, 0));
   border-bottom-color: transparent;
   color: #fff;
 }
@@ -299,30 +340,48 @@ body.dark .card, body.dark .pill-bar, body.dark .header { background: var(--dark
 body.dark .muted { color: var(--dark-muted); }
 body.dark h3 { color: var(--dark-muted); }
 body.dark .dock-label { color: var(--dark-muted); }
-body.dark .dock-panel .dock-label { background: rgba(11, 19, 39, 0.85); border-color: rgba(255, 255, 255, 0.25); color: #fff; }
-body.dark input, body.dark textarea { background: #131e38; color: #fff; border-color: var(--dark-border); }
+body.dark .dock-panel .dock-label { background: rgba(8, 13, 32, 0.85); border-color: rgba(255, 255, 255, 0.25); color: #fff; }
+body.dark input, body.dark textarea { background: #10172c; color: #fff; border-color: var(--dark-border); }
 body.dark button.primary { background: #ffffff; color: var(--ink); }
 body.dark .avatar { background: #ffffff; color: var(--ink); border: 1px solid var(--dark-border); }
-body.dark .profile-cover, body.dark .profile-tile { background: #131e38; color: var(--dark-text); }
-body.dark .pill-bar button.active { background: #131e38; }
-body.dark .filter-strip button { background: #131e38; }
-body.dark .dock-panel { background: rgba(11, 19, 39, 0.45); border-color: rgba(255, 255, 255, 0.25); }
+body.dark .profile-cover, body.dark .profile-tile { background: #10172c; color: var(--dark-text); }
+body.dark .pill-bar button.active { background: #10172c; }
+body.dark .filter-strip button { background: #10172c; }
+body.dark .dock-panel { background: rgba(8, 13, 32, 0.45); border-color: rgba(255, 255, 255, 0.25); }
 body.dark .dock-icon { color: #fff; }
 body.dark .dock-panel button.active .dock-icon, body.dark .dock-panel .dock-item.active .dock-icon { color: #fff; }
-body.dark .dock-badge { border-color: rgba(11, 19, 39, 0.6); }
-body.dark .dock-rail { background: var(--dark-bg); border-right-color: var(--dark-border); }
-body.dark .dock-rail .dock-icon { color: #fff; }
-body.dark .dock-rail .dock-label { color: var(--dark-muted); }
+body.dark .dock-badge { border-color: rgba(8, 13, 32, 0.6); }
 
 /* ---------- Responsive breakpoints ---------- */
 /* Phone (<=640px): single 100% column, 16px gutters, header 56px.
    Smaller display / title / section / stat sizes at this width. */
 @media (max-width: 640px) {
-  h1, .logo { font-size: 20px; line-height: 24px; }
-  .logo-text { font-size: 20px; line-height: 24px; }
-  h2 { font-size: 18px; line-height: 24px; }
+  h1, .logo { font-size: 22px; line-height: 26px; }
+  .logo-text { font-size: 22px; line-height: 26px; }
+  h2 { font-size: 17px; line-height: 24px; }
   h3 { font-size: 13px; line-height: 18px; }
-  .stat-number, .profile-stats button strong { font-size: 16px; line-height: 20px; }
+  .stat-number, .profile-stats button strong { font-size: 15px; line-height: 20px; }
+  /* 390px: 12px horizontal padding for text/controls, no overflow. */
+  .header { padding: 0 12px; }
+  .stories { padding: 12px; }
+  .pill-bar { margin: 8px 12px; }
+  .create-post-row { padding: 0 12px; }
+  .card { padding: 16px 12px; }
+  .signin { padding: 24px 12px; }
+  .filter-strip { padding: 8px 12px; }
+  .profile-modal-card { padding: 16px 12px; }
+  .post-overlay { padding: 48px 12px 12px; }
+  .profile-page > div > div:nth-child(2) { padding: 0 12px; }
+}
+
+/* <=360px: shortcut labels shrink and truncate, never overlap; the
+   44px dock targets and all 6 dock destinations are unchanged. */
+@media (max-width: 360px) {
+  .pill-label { font-size: 10px; line-height: 13px; max-width: 52px; overflow: hidden; text-overflow: ellipsis; }
+  .pill-icon { width: 14px; height: 14px; }
+  .pill-icon svg { width: 14px; height: 14px; }
+  .pill-chevron { padding: 0 8px 0 6px; }
+  .story-username { font-size: 10px; }
 }
 
 /* Tablet (641–1024px): content column max-width 600px centred, 24px gutters. */
@@ -337,36 +396,30 @@ body.dark .dock-rail .dock-label { color: var(--dark-muted); }
   .profile-modal-card { padding: 24px; }
 }
 
-/* Desktop (>=1025px): content column max-width 680px centred, header spans
-   the content column, 56px. One type scale at all widths — the column
-   widens, the text does not grow. Slim left icon rail appears. */
+/* Desktop (>=1025px): feed column max-width 720px centred. No desktop
+   rail — the floating dock is the only navigation on all breakpoints.
+   Wordmark 24px, profile display name 18px, stats 16px at this width. */
 @media (min-width: 1025px) {
-  .app { max-width: 680px; }
-  .dock-rail {
-    display: flex; position: fixed; left: 0; top: 0; bottom: 0; z-index: 40;
-    width: 72px; flex-direction: column; align-items: center;
-    padding: 16px 0; gap: 8px;
-    background: var(--paper); border-right: 1px solid var(--hairline);
-  }
-  .dock-rail button { position: relative; background: none; border: none; min-width: 44px; min-height: 44px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; padding: 0; }
-  /* Rail active uses the same purple gradient ring as the glass dock —
-     the old rose dot is gone. */
-  .dock-rail button.active {
-    transform: none;
-    width: 44px; height: 44px; min-width: 44px; min-height: 44px;
-    border-radius: 50%; border: 2px solid transparent;
-    background: linear-gradient(rgba(255, 255, 255, 0), rgba(255, 255, 255, 0)) padding-box, var(--drop-ring) border-box;
-  }
-  /* Side-panel logo tile — dark-navy rounded square, gradient droplet
-     icon only (no wordmark). */
-  .rail-logo { width: 48px; height: 48px; flex: 0 0 auto; background: #0b1327; border-radius: 14px; display: flex; align-items: center; justify-content: center; margin-bottom: 8px; }
-  .rail-logo .logo-mark { width: 28px; height: 28px; }
-  .dock-rail .dock-label { opacity: 0; transition: opacity 150ms ease; color: var(--muted); }
-  /* Rail icons stay ink on the light rail (the glass dock's white icons
-     do not apply here); dark theme flips them white, see below. */
-  .dock-rail .dock-icon { color: var(--ink); }
-  .dock-rail button:hover .dock-label, .dock-rail button:focus-visible .dock-label { opacity: 1; }
-  .dock-rail button.active .dock-icon { color: var(--ink); }
+  .app { max-width: 720px; }
+  .app:has(.profile-page) { max-width: 900px; }
+  h1, .logo { font-size: 24px; line-height: 28px; }
+  .logo-text { font-size: 24px; line-height: 28px; }
+  h2 { font-size: 18px; line-height: 26px; }
+  .stat-number, .profile-stats button strong { font-size: 16px; line-height: 22px; }
+  .profile-stats button span { font-size: 12px; line-height: 17px; }
+  .pill-label { font-size: 12px; line-height: 17px; }
+  .story-username { font-size: 11px; line-height: 15px; }
+  .profile-page h2 { font-size: 18px; line-height: 26px; }
+  .profile-page h2 + p.muted { font-size: 13px; line-height: 18px; }
+  .profile-page p.muted { font-size: 13px; line-height: 18px; }
+  .profile-page p.muted.profile-location { font-size: 12px; line-height: 17px; }
+  .profile-page > div > div:nth-child(2) { padding: 0 16px; }
+  .profile-cover { height: 150px; }
+  .profile-avatar-wrap { margin-top: -30px; }
+  .profile-page .profile-avatar-wrap .avatar { width: 80px; height: 80px; font-size: 27px; }
+  .profile-stats { gap: 32px; }
+  .profile-grid { gap: 3px; }
+  .profile-tabs button { font-size: 13px; line-height: 18px; }
 }
 
 /* Reduce motion (Settings → Accessibility): disables animations and
@@ -376,5 +429,4 @@ body.reduce-motion *, body.reduce-motion *::before, body.reduce-motion *::after 
   animation: none !important;
   transition: none !important;
 }
-body.reduce-motion .dock-panel button.active,
-body.reduce-motion .dock-rail button.active { transform: none; }
+body.reduce-motion .dock-panel button.active { transform: none; }
