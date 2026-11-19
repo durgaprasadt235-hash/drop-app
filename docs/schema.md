@@ -41,6 +41,23 @@ are seeded — every row is created by a real user in the app.
 
 `users` also gained Page 04 columns: `cover_url`, `links` (JSONB, https only), `location`, `birthday`, `updated_at`.
 
+## Profile end-to-end (2026-11-19)
+
+Profile content is server-backed: posts, Reels, Drops and saves are
+written to Neon by `POST /api/profile/posts|reels|drops`,
+`POST /api/profile/save`, `POST /api/profile/drops/open` and read by
+`GET /api/profile/<id>/posts|reels|drops` + `GET /api/profile/me/saved`
+(all behind the single `api/profile/[...route].ts` function), so header
+counts (`profileCounts`, from the same Neon tables) agree with the
+tabs, and another user's content is visible on any device. `reports`,
+`conversations`, `conversation_members` and `messages` are created by
+`ensureProfileTables`; `POST /api/profile/conversations` enforces the
+target's stored `who_can_message` server-side. `post_saves.post_id`
+references `posts(id)` — an earlier migration wrongly referenced
+`users(id)` and is repaired idempotently by `ensureProfileTables`.
+No Story Highlights feature exists anywhere in the app, so the Profile
+page renders no highlights row (none is faked).
+
 ## Key rules (enforced server-side, see `api/README.md`)
 
 - A Story expires 24h after creation; expired Stories are never returned.

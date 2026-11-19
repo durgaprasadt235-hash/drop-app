@@ -62,6 +62,8 @@ export default function App() {
   const [viewedUsername, setViewedUsername] = useState<string | null>(null);
   const [viewedProfile, setViewedProfile] = useState<PublicProfile | null>(null);
   const [profileError, setProfileError] = useState('');
+  // DM opened from a profile's Message button (createConversation).
+  const [openConversationId, setOpenConversationId] = useState<number | null>(null);
   const [roomIdentity, setRoomIdentity] = useState<{ id: number; name: string } | null>(null);
   const googleBtnRef = useRef<HTMLDivElement | null>(null);
   const linkGoogleBtnRef = useRef<HTMLDivElement | null>(null);
@@ -345,8 +347,6 @@ export default function App() {
             <button className="ghost" onClick={() => setView('hub')}>+ Drop</button>
           </div>
 
-          {editing && <StoryEditor initialFilter="original" onPublish={publishEditor} onCancel={() => setEditing(null)} />}
-
           {visibleFeed.length === 0 && <p className="muted" style={{ padding: 16 }}>No posts yet — create the first one.</p>}
           {visibleFeed.map((p) => (
             <PostCard
@@ -360,7 +360,7 @@ export default function App() {
       {view === 'discover' && <ReelsView />}
       {view === 'hub' && <DropHub drops={drops} onRefresh={() => void refresh()} />}
       {view === 'search' && <SearchView users={users} onOpenProfile={(username) => { setViewedUsername(username); setView('profile'); }} />}
-      {view === 'messages' && <MessagesView conversations={conversations} users={users} me={me} />}
+      {view === 'messages' && <MessagesView conversations={conversations} users={users} me={me} initialOpenId={openConversationId} />}
       {view === 'clubrooms' && <ClubroomsView me={me} onJoinIdentity={(room) => { setRoomIdentity(room); setView('room-identity'); }} />}
       {view === 'notifications' && <NotificationsView />}
       {view === 'saved' && <SavedView />}
@@ -420,7 +420,13 @@ export default function App() {
                 onPrivacy={() => setView('privacy')}
                 onAdmin={() => setView('admin')}
                 onOpenUser={(username) => { setViewedUsername(username); setView('profile'); }}
-                onMessage={() => setView('messages')}
+                onOpenConversation={async (conversationId) => {
+                  setOpenConversationId(conversationId);
+                  await refresh();
+                  setView('messages');
+                }}
+                onCreatePost={() => setEditing('post')}
+                onRefresh={() => void refresh()}
               />
               {viewedProfile.id === me.id && (
                 <div style={{ padding: '0 12px 12px' }}>
@@ -442,6 +448,7 @@ export default function App() {
           me={me}
           onBack={() => setView('profile')}
           onSaved={(u) => { setMe(u); void refresh(); setView('profile'); }}
+          onRefresh={() => void refresh()}
         />
       )}
       {view === 'privacy' && (
@@ -450,6 +457,10 @@ export default function App() {
       {view === 'room-identity' && roomIdentity && (
         <RoomIdentityPage me={me} clubroomId={roomIdentity.id} clubroomName={roomIdentity.name} onBack={() => setView('clubrooms')} />
       )}
+
+      {/* Post / Story editor — mounted on every view (not just Home) so
+          "Create your first post" works from the Profile page too. */}
+      {editing && <StoryEditor initialFilter="original" onPublish={publishEditor} onCancel={() => setEditing(null)} />}
 
       {viewerIndex !== null && (
         <StoryViewer stories={stories} index={viewerIndex} onClose={() => setViewerIndex(null)} onIndex={setViewerIndex} />

@@ -19,6 +19,8 @@ export interface User {
   displayName: string;
   avatarUrl?: string | null;
   bio?: string;
+  /** Viewer relationship, returned by the followers/following lists. */
+  relationship?: 'following' | 'requested' | 'none' | 'self';
   isPrivate?: boolean;
   /** Google account id (sub) this profile is linked to, if any. */
   googleSub?: string | null;
@@ -76,6 +78,9 @@ export interface PublicProfile {
   location?: string | null;
   birthday?: string | null;
   counts?: { posts: number; followers: number; following: number };
+  /** Server-computed from the target's stored who_can_message: whether
+   *  the viewer may open a DM with this account. */
+  canMessage?: boolean;
   createdAt?: string;
 }
 
@@ -517,7 +522,7 @@ export async function getMyProfileServer(): Promise<PublicProfile | null> {
       avatarUrl: p.avatarUrl ?? null, coverUrl: p.coverUrl ?? null,
       bio: p.bio ?? '', links: p.links ?? [], location: p.location ?? null,
       birthday: p.birthday ?? null, isPrivate: Boolean(p.isPrivate),
-      relationship: 'self', counts: data.counts, createdAt: p.createdAt,
+      relationship: 'self', counts: data.counts, canMessage: p.canMessage ?? true, createdAt: p.createdAt,
     };
   } catch { return null; }
 }
@@ -532,7 +537,8 @@ export async function getPublicProfile(username: string): Promise<PublicProfile>
         avatarUrl: p.avatarUrl ?? null, coverUrl: p.coverUrl ?? null,
         bio: p.bio ?? '', links: p.links ?? [], location: p.location ?? null,
         birthday: p.birthday ?? null, isPrivate: Boolean(p.isPrivate),
-        relationship: p.relationship ?? 'none', counts: p.counts, createdAt: p.createdAt,
+        relationship: p.relationship ?? 'none', counts: p.counts,
+        canMessage: p.canMessage ?? false, createdAt: p.createdAt,
       };
     } catch (err) { throw err; }
   }
@@ -622,10 +628,19 @@ export async function listFollowersFollowing(userId: number, kind: 'followers' |
   if (dbOn) {
     try {
       const data = await serverFetch(`/api/profile/lists?targetId=${userId}&kind=${kind}`);
-      return (data.users ?? []).map((u: any) => ({ id: u.id, username: u.username, displayName: u.displayName, avatarUrl: u.avatarUrl ?? null }));
+      return (data.users ?? []).map((u: any) => ({
+        id: u.id, username: u.username, displayName: u.displayName,
+        avatarUrl: u.avatarUrl ?? null, relationship: u.relationship ?? 'none',
+      }));
     } catch (err) { throw err; }
   }
-  return kind === 'followers' ? listFollowers(userId) : listFollowing(userId);
+  const users = kind === 'followers' ? await listFollowers(userId) : await listFollowing(userId);
+  return users.map((u) => ({
+    ...u,
+    relationship: u.id === currentUserId ? 'self'
+      : store.follows.some((f) => f.followerId === currentUserId && f.followingId === u.id) ? 'following'
+      : store.followRequests.some((r) => r.requesterId === currentUserId && r.targetId === u.id && r.status === 'pending') ? 'requested' : 'none',
+  }));
 }
 
 export async function getRoomIdentity(clubroomId: number): Promise<{ myIdentity: RoomIdentity | null; members: { identityMode: string; displayName: string; username?: string; avatarUrl?: string | null }[]; member: boolean }> {
@@ -920,12 +935,58 @@ export function isMutedLocal(userId: number): boolean {
   return me !== null && store.mutes.some((m) => m.muterId === me && m.mutedId === userId);
 }
 
+/**
+ * Report a user. Server-first (POST /api/profile/report) — the report is
+ * stored in Neon for moderation. The old client wrote a notification
+ * into the target's local store, which did nothing on any other device.
+ */
 export async function reportUser(userId: number, reason: string): Promise<void> {
   const me = requireUser();
+  if (dbOn) {
+    await serverFetch('/api/profile/report', {
+      method: 'POST',
+      body: JSON.stringify({ targetId: userId, reason }),
+    });
+    return;
+  }
   store.notifications.push({
     id: nextId(), userId, type: 'report', body: `Reported by ${me.username}: ${reason}`, read: false, createdAt: nowIso(),
   });
   saveStore(store);
+}
+
+/**
+ * Find or create a 1:1 DM conversation with a user. Server-first
+ * (POST /api/profile/conversations): the server enforces the target's
+ * stored who_can_message and blocking before any conversation exists.
+ * Until this existed, no code path in the app created a conversation
+ * at all — the profile Message button led to an empty inbox.
+ */
+export async function createConversation(targetId: number): Promise<number> {
+  const me = requireUser();
+  if (targetId === me.id) throw new Error('You cannot message yourself.');
+  if (dbOn) {
+    const data = await serverFetch('/api/profile/conversations', {
+      method: 'POST',
+      body: JSON.stringify({ targetId }),
+    });
+    const id = Number(data.conversationId);
+    if (!Number.isInteger(id) || id <= 0) throw new Error('Could not open this conversation.');
+    if (store.seq < id) store.seq = id;
+    if (!store.conversations.some((c) => c.id === id)) {
+      store.conversations.push({ id, memberIds: [me.id, targetId] });
+    }
+    saveStore(store);
+    return id;
+  }
+  const existing = store.conversations.find(
+    (c) => c.memberIds.length === 2 && c.memberIds.includes(me.id) && c.memberIds.includes(targetId),
+  );
+  if (existing) return existing.id;
+  const conv = { id: nextId(), memberIds: [me.id, targetId] };
+  store.conversations.push(conv);
+  saveStore(store);
+  return conv.id;
 }
 
 // -------------------------------------------------------------- feed -----
@@ -939,10 +1000,42 @@ export async function listFeed(): Promise<Post[]> {
     .map((p) => ({ ...p, author: userById(p.authorId) }));
 }
 
+/**
+ * Create a post. Server-first when the shared DB is configured
+ * (POST /api/profile/posts) so the post exists in Neon — that is what
+ * makes profile counts, profile tabs and other devices agree. The
+ * server row is mirrored into the local store so Home/feed keep
+ * working; if the server is unreachable the post is created locally
+ * only (same fallback as the rest of this client).
+ */
 export async function createPost(args: {
   caption: string; mediaUrl?: string | null; filter?: string; effect?: string; extrasJson?: string | null;
 }): Promise<Post> {
   const me = requireUser();
+  if (dbOn) {
+    try {
+      const data = await serverFetch('/api/profile/posts', {
+        method: 'POST',
+        body: JSON.stringify({
+          caption: args.caption, mediaUrl: args.mediaUrl ?? null,
+          filter: args.filter ?? 'original', effect: args.effect ?? 'none',
+          extrasJson: args.extrasJson ?? null,
+        }),
+      });
+      const p = data.post;
+      const post: Post = {
+        id: p.id, authorId: p.authorId, caption: p.caption,
+        mediaUrl: p.mediaUrl ?? null, filter: p.filter ?? 'original',
+        effect: p.effect ?? 'none', extrasJson: p.extrasJson ?? null,
+        fireCount: p.fireCount ?? 0, commentCount: p.commentCount ?? 0,
+        createdAt: p.createdAt,
+      };
+      if (store.seq < post.id) store.seq = post.id;
+      if (!store.posts.some((x) => x.id === post.id)) store.posts.push(post);
+      saveStore(store);
+      return { ...post, author: me };
+    } catch { /* fall through to local-only create */ }
+  }
   const post: Post = {
     id: nextId(), authorId: me.id, caption: args.caption,
     mediaUrl: args.mediaUrl ?? null, filter: args.filter ?? 'original',
@@ -956,8 +1049,16 @@ export async function createPost(args: {
 
 export async function deletePost(postId: number): Promise<void> {
   const me = requireUser();
+  if (dbOn) {
+    try {
+      await serverFetch(`/api/profile/posts?id=${postId}`, { method: 'DELETE' });
+    } catch { /* fall through to local delete */ }
+  }
   const post = store.posts.find((p) => p.id === postId);
-  if (!post) throw new Error('Post not found.');
+  if (!post) {
+    if (!dbOn) throw new Error('Post not found.');
+    return; // server already deleted it; nothing local to remove
+  }
   if (post.authorId !== me.id) throw new Error('Only the author can delete this post.');
   store.posts = store.posts.filter((p) => p.id !== postId);
   saveStore(store);
@@ -981,6 +1082,22 @@ export async function toggleLike(postId: number): Promise<{ fired: boolean; coun
 
 export async function toggleSave(postId: number): Promise<{ saved: boolean }> {
   const me = requireUser();
+  if (dbOn) {
+    try {
+      const data = await serverFetch('/api/profile/save', {
+        method: 'POST',
+        body: JSON.stringify({ postId }),
+      });
+      const saved = Boolean(data.saved);
+      if (saved && !store.saves.some((s) => s.userId === me.id && s.postId === postId)) {
+        store.saves.push({ userId: me.id, postId });
+      } else if (!saved) {
+        store.saves = store.saves.filter((s) => !(s.userId === me.id && s.postId === postId));
+      }
+      saveStore(store);
+      return { saved };
+    } catch { /* fall through to local toggle */ }
+  }
   const idx = store.saves.findIndex((s) => s.userId === me.id && s.postId === postId);
   if (idx >= 0) store.saves.splice(idx, 1);
   else store.saves.push({ userId: me.id, postId });
@@ -1014,12 +1131,71 @@ export async function deleteComment(commentId: number): Promise<void> {
 
 export async function listSaved(): Promise<Post[]> {
   const me = requireUser();
+  if (dbOn) {
+    try {
+      const data = await serverFetch('/api/profile/me/saved');
+      return (data.posts ?? []).map((p: any) => ({
+        id: p.id, authorId: p.authorId, caption: p.caption ?? '',
+        mediaUrl: p.mediaUrl ?? null, filter: p.filter ?? 'original',
+        effect: p.effect ?? 'none', extrasJson: p.extrasJson ?? null,
+        fireCount: p.fireCount ?? 0, commentCount: p.commentCount ?? 0,
+        createdAt: p.createdAt, author: userById(p.authorId),
+      }));
+    } catch { /* fall through to local */ }
+  }
   const ids = new Set(store.saves.filter((s) => s.userId === me.id).map((s) => s.postId));
   return store.posts.filter((p) => ids.has(p.id)).map((p) => ({ ...p, author: userById(p.authorId) }));
 }
 
+function mapServerPost(p: any): Post {
+  return {
+    id: p.id, authorId: p.authorId, caption: p.caption ?? '',
+    mediaUrl: p.mediaUrl ?? null, filter: p.filter ?? 'original',
+    effect: p.effect ?? 'none', extrasJson: p.extrasJson ?? null,
+    fireCount: p.fireCount ?? 0, commentCount: p.commentCount ?? 0,
+    createdAt: p.createdAt, author: userById(p.authorId),
+  };
+}
+
+/** Profile Posts tab: server-first (Neon), local fallback. */
 export async function listPostsByUser(userId: number): Promise<Post[]> {
+  if (dbOn) {
+    try {
+      const data = await serverFetch(`/api/profile/${userId}/posts`);
+      return (data.posts ?? []).map(mapServerPost);
+    } catch { /* fall through to local */ }
+  }
   return store.posts.filter((p) => p.authorId === userId).map((p) => ({ ...p, author: userById(p.authorId) }));
+}
+
+/** Profile Reels tab: server-first (Neon), local fallback. */
+export async function listReelsByUser(userId: number): Promise<{ id: number; authorId: number; mediaUrl: string; createdAt: string; author?: User }[]> {
+  if (dbOn) {
+    try {
+      const data = await serverFetch(`/api/profile/${userId}/reels`);
+      return (data.reels ?? []).map((r: any) => ({
+        id: r.id, authorId: r.authorId, mediaUrl: r.mediaUrl,
+        createdAt: r.createdAt, author: userById(r.authorId),
+      }));
+    } catch { /* fall through to local */ }
+  }
+  return store.reels.filter((r) => r.authorId === userId).map((r) => ({ ...r, author: userById(r.authorId) }));
+}
+
+/** Profile Drops tab: server-first (Neon), local fallback. Sealed Drops
+ *  arrive with caption/media stripped server-side (creator excepted). */
+export async function listDropsByUser(userId: number): Promise<Drop[]> {
+  if (dbOn) {
+    try {
+      const data = await serverFetch(`/api/profile/${userId}/drops`);
+      return (data.drops ?? []).map((d: any) => ({
+        id: d.id, creatorId: d.creatorId, kind: d.kind, status: d.status,
+        blastAt: d.blastAt, caption: d.caption ?? null,
+        mediaUrl: d.mediaUrl ?? null, createdAt: d.createdAt,
+      }));
+    } catch { /* fall through to local */ }
+  }
+  return store.drops.filter((d) => d.creatorId === userId);
 }
 
 export async function getPost(postId: number): Promise<Post | null> {
@@ -1082,6 +1258,27 @@ export async function createDrop(args: {
   kind: 'public' | 'protected'; blastAt: string; caption?: string; mediaUrl?: string;
 }): Promise<Drop> {
   const me = requireUser();
+  if (dbOn) {
+    try {
+      const data = await serverFetch('/api/profile/drops', {
+        method: 'POST',
+        body: JSON.stringify({
+          kind: args.kind, blastAt: args.blastAt,
+          caption: args.caption ?? null, mediaUrl: args.mediaUrl ?? null,
+        }),
+      });
+      const d = data.drop;
+      const drop: Drop = {
+        id: d.id, creatorId: d.creatorId, kind: d.kind, status: d.status,
+        blastAt: d.blastAt, caption: d.caption ?? null,
+        mediaUrl: d.mediaUrl ?? null, createdAt: d.createdAt,
+      };
+      if (store.seq < drop.id) store.seq = drop.id;
+      if (!store.drops.some((x) => x.id === drop.id)) store.drops.push(drop);
+      saveStore(store);
+      return drop;
+    } catch { /* fall through to local-only create */ }
+  }
   const drop: Drop = {
     id: nextId(), creatorId: me.id, kind: args.kind,
     status: new Date(args.blastAt).getTime() <= Date.now() ? 'ready' : 'waiting',
@@ -1095,6 +1292,22 @@ export async function createDrop(args: {
 
 export async function openDrop(dropId: number): Promise<Drop> {
   const me = requireUser();
+  if (dbOn) {
+    try {
+      const data = await serverFetch('/api/profile/drops/open', {
+        method: 'POST',
+        body: JSON.stringify({ dropId }),
+      });
+      const d = data.drop;
+      const local = store.drops.find((x) => x.id === dropId);
+      if (local) { local.status = 'revealed'; saveStore(store); }
+      return {
+        id: d.id, creatorId: d.creatorId, kind: d.kind, status: d.status,
+        blastAt: d.blastAt, caption: d.caption ?? null,
+        mediaUrl: d.mediaUrl ?? null, createdAt: d.createdAt,
+      };
+    } catch { /* fall through to the local rule, which enforces the same sealed-until-blast check */ }
+  }
   const drop = store.drops.find((d) => d.id === dropId);
   if (!drop) throw new Error('Drop not found.');
   // Sealed Drops stay sealed until blast time — enforced server-side in
@@ -1140,6 +1353,20 @@ export async function listReels() {
 
 export async function createReel(mediaUrl: string) {
   const me = requireUser();
+  if (dbOn) {
+    try {
+      const data = await serverFetch('/api/profile/reels', {
+        method: 'POST',
+        body: JSON.stringify({ mediaUrl }),
+      });
+      const r = data.reel;
+      const reel = { id: r.id, authorId: r.authorId, mediaUrl: r.mediaUrl, createdAt: r.createdAt };
+      if (store.seq < reel.id) store.seq = reel.id;
+      if (!store.reels.some((x) => x.id === reel.id)) store.reels.push(reel);
+      saveStore(store);
+      return { ...reel, author: me };
+    } catch { /* fall through to local-only create */ }
+  }
   const reel = { id: nextId(), authorId: me.id, mediaUrl, createdAt: nowIso() };
   store.reels.push(reel);
   saveStore(store);
@@ -1284,11 +1511,12 @@ export const ACTIONS = [
   'respondFollowRequestByFollower',
   'blockUser', 'unblockUser', 'muteUser', 'unmuteUser', 'reportUser', 'listFeed', 'createPost',
   'deletePost', 'toggleLike', 'toggleSave', 'listComments', 'addComment',
-  'deleteComment', 'listSaved', 'listPostsByUser', 'getPost', 'listStories',
+  'deleteComment', 'listSaved', 'listPostsByUser', 'listReelsByUser',
+  'listDropsByUser', 'getPost', 'listStories',
   'createStory', 'deleteStory', 'voteStoryPoll', 'answerStoryQuestion',
   'rateStorySlider', 'listDrops', 'createDrop', 'openDrop', 'getDrop',
   'listScheduledDrops', 'listTrendingDrops', 'searchHubDrops', 'deleteDrop',
-  'listReels', 'createReel', 'listConversations', 'listMessages',
+  'listReels', 'createReel', 'createConversation', 'listConversations', 'listMessages',
   'sendMessage', 'deleteMessage', 'sendPostToConversation',
   'createSlashInvitation', 'respondSlashInvitation', 'leaveSlash',
   'listClubrooms', 'createClubroom', 'joinClubroom', 'leaveClubroom',

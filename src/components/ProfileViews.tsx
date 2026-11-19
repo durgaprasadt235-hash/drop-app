@@ -5,16 +5,23 @@
 // initial; empty tabs show real empty states.
 
 import { useEffect, useState } from 'react';
-import type { Post, PrivacyPrefs, PublicProfile, User } from '../lib/api';
+import type { Drop, Post, PrivacyPrefs, PublicProfile, User } from '../lib/api';
 import {
-  DEFAULT_PRIVACY, followUser, unfollowUser, listPostsByUser, listReels,
-  listDrops, listSaved, updateProfile, uploadProfilePhoto, getMyPrivacy,
+  DEFAULT_PRIVACY, followUser, unfollowUser, listPostsByUser, listReelsByUser,
+  listDropsByUser, listSaved, updateProfile, uploadProfilePhoto, getMyPrivacy,
   updateMyPrivacy, listFollowRequests, respondFollowRequest,
   listBlockedMuted, unblockUser, unmuteUser, muteUser, blockUser,
   reportUser, listFollowersFollowing, getRoomIdentity,
   joinClubroomWithIdentity, updateRoomIdentity, revokeSession,
+  createConversation, openDrop, isMutedLocal, deletePost,
 } from '../lib/api';
 import type { FollowRequestItem, RoomIdentity } from '../lib/api';
+import PostCard from './PostCard';
+import { filterCss } from '../lib/filters';
+
+function isImageUrl(url: string | null | undefined): url is string {
+  return typeof url === 'string' && (/^(https?:\/\/|data:image\/)/.test(url));
+}
 
 function initials(name: string): string {
   return (name.trim()[0] ?? '?').toUpperCase();
@@ -56,34 +63,66 @@ export function ProfilePage(props: {
   onAdmin: () => void;
   isOwner: boolean;
   onOpenUser: (username: string) => void;
-  onMessage: (userId: number) => void;
+  /** Opened with a real conversation id (created via createConversation). */
+  onOpenConversation: (conversationId: number) => void;
+  /** Owner only: open the post editor. */
+  onCreatePost: () => void;
+  /** Reload this profile from the server (after upload / unblock). */
+  onRefresh: () => void;
 }) {
   const { profile, me, isOwner } = props;
   const [tab, setTab] = useState<'posts' | 'reels' | 'drops' | 'saved'>('posts');
   const [posts, setPosts] = useState<Post[]>([]);
-  const [reels, setReels] = useState<any[]>([]);
-  const [drops, setDrops] = useState<any[]>([]);
+  const [reels, setReels] = useState<{ id: number; authorId: number; mediaUrl: string; createdAt: string; author?: User }[]>([]);
+  const [drops, setDrops] = useState<Drop[]>([]);
   const [saved, setSaved] = useState<Post[]>([]);
   const [rel, setRel] = useState(profile.relationship);
   const [moreOpen, setMoreOpen] = useState(false);
   const [notice, setNotice] = useState('');
   const [listKind, setListKind] = useState<'followers' | 'following' | null>(null);
   const [listUsers, setListUsers] = useState<User[]>([]);
+  const [listRel, setListRel] = useState<Record<number, string>>({});
+  const [selectedPost, setSelectedPost] = useState<Post | null>(null);
+  const [selectedReel, setSelectedReel] = useState<{ id: number; mediaUrl: string; createdAt: string } | null>(null);
+  const [selectedDrop, setSelectedDrop] = useState<Drop | null>(null);
+  const [blocked, setBlocked] = useState(false);
+  const [muted, setMuted] = useState(() => isMutedLocal(profile.id));
 
-  useEffect(() => { setRel(profile.relationship); }, [profile.relationship]);
+  useEffect(() => { setRel(profile.relationship); setBlocked(false); setMuted(isMutedLocal(profile.id)); }, [profile.id, profile.relationship]);
+  // Content comes from the server (Neon) first — listPostsByUser and
+  // friends are server-first in api.ts — so tabs and header counts
+  // agree, and another user's content is visible on any device.
   useEffect(() => {
-    void listPostsByUser(profile.id).then(setPosts);
-    void listReels().then((r) => setReels(r.filter((x: any) => x.authorId === profile.id)));
-    void listDrops().then((d) => setDrops(d.filter((x: any) => x.creatorId === profile.id)));
-    if (isOwner) void listSaved().then(setSaved);
+    void listPostsByUser(profile.id).then(setPosts).catch(() => setPosts([]));
+    void listReelsByUser(profile.id).then(setReels).catch(() => setReels([]));
+    void listDropsByUser(profile.id).then(setDrops).catch(() => setDrops([]));
+    if (isOwner) void listSaved().then(setSaved).catch(() => setSaved([]));
   }, [profile.id, isOwner]);
 
   const openList = async (kind: 'followers' | 'following') => {
     try {
-      setListUsers(await listFollowersFollowing(profile.id, kind));
+      const users = await listFollowersFollowing(profile.id, kind);
+      const rels: Record<number, string> = {};
+      users.forEach((u) => { rels[u.id] = u.id === me.id ? 'self' : (u.relationship ?? 'none'); });
+      setListRel(rels);
+      setListUsers(users);
       setListKind(kind);
     } catch (err) {
       setNotice(err instanceof Error ? err.message : 'Could not load that list.');
+    }
+  };
+
+  const toggleListFollow = async (u: User) => {
+    try {
+      if (listRel[u.id] === 'following' || listRel[u.id] === 'requested') {
+        await unfollowUser(u.id);
+        setListRel((r) => ({ ...r, [u.id]: 'none' }));
+      } else {
+        const status = await followUser(u.id);
+        setListRel((r) => ({ ...r, [u.id]: status }));
+      }
+    } catch (err) {
+      setNotice(err instanceof Error ? err.message : 'Follow failed.');
     }
   };
 
@@ -96,7 +135,29 @@ export function ProfilePage(props: {
     }
   };
 
+  const doMessage = async () => {
+    if (profile.canMessage === false) {
+      setNotice('This account does not accept messages from you. Check their privacy settings.');
+      return;
+    }
+    try {
+      const id = await createConversation(profile.id);
+      props.onOpenConversation(id);
+    } catch (err) {
+      setNotice(err instanceof Error ? err.message : 'Could not open this conversation.');
+    }
+  };
+
+  const reloadDrops = async () => {
+    const d = await listDropsByUser(profile.id).catch(() => [] as Drop[]);
+    setDrops(d);
+    setSelectedDrop((s) => (s ? d.find((x) => x.id === s.id) ?? null : null));
+  };
+
   const counts = profile.counts ?? { posts: posts.length, followers: 0, following: 0 };
+  // A private account hides its bio, counts and content from anyone who
+  // is not an approved follower — Instagram shows a lock state instead.
+  const locked = profile.isPrivate && !isOwner && rel !== 'following';
 
   return (
     <div>
@@ -115,7 +176,7 @@ export function ProfilePage(props: {
                 onChange={async (e) => {
                   const f = e.target.files?.[0];
                   if (!f) return;
-                  try { await uploadProfilePhoto('avatar', f); setNotice('Photo updated.'); } catch (err) { setNotice(err instanceof Error ? err.message : 'Upload failed.'); }
+                  try { await uploadProfilePhoto('avatar', f); setNotice('Photo updated.'); props.onRefresh(); } catch (err) { setNotice(err instanceof Error ? err.message : 'Upload failed.'); }
                 }}
               />
             </label>
@@ -130,25 +191,66 @@ export function ProfilePage(props: {
         {profile.location && <p className="muted">📍 {profile.location}</p>}
         {notice && <div className="notice">{notice}</div>}
 
-        {/* Stats — real counts, tap opens the list */}
-        <div className="profile-stats" role="group" aria-label="Profile statistics">
-          <button type="button" onClick={() => setTab('posts')}><strong>{counts.posts}</strong><span>Posts</span></button>
-          <button type="button" onClick={() => void openList('followers')}><strong>{counts.followers}</strong><span>Followers</span></button>
-          <button type="button" onClick={() => void openList('following')}><strong>{counts.following}</strong><span>Following</span></button>
-        </div>
+        {/* Stats — real server counts, tap opens the real list.
+            A private account hides its counts from non-followers (the
+            server strips them), so the stats row is hidden in the lock
+            state below instead of showing 0s. */}
+        {!locked && !blocked && (
+          <div className="profile-stats" role="group" aria-label="Profile statistics">
+            <button type="button" onClick={() => setTab('posts')}><strong>{counts.posts}</strong><span>Posts</span></button>
+            <button type="button" onClick={() => void openList('followers')}><strong>{counts.followers}</strong><span>Followers</span></button>
+            <button type="button" onClick={() => void openList('following')}><strong>{counts.following}</strong><span>Following</span></button>
+          </div>
+        )}
         {listKind && (
           <div className="card">
             <strong>{listKind === 'followers' ? 'Followers' : 'Following'}</strong>
             <button className="ghost" style={{ float: 'right' }} onClick={() => setListKind(null)}>Close</button>
             {listUsers.length === 0 && <p className="muted">Nobody here yet.</p>}
             {listUsers.map((u) => (
-              <p key={u.id}><button className="ghost" onClick={() => props.onOpenUser(u.username)}>@{u.username}</button> {u.displayName}</p>
+              <div key={u.id} className="profile-user-row">
+                <button
+                  type="button"
+                  onClick={() => { setListKind(null); props.onOpenUser(u.username); }}
+                  style={{ display: 'flex', alignItems: 'center', gap: 10, flex: 1, minWidth: 0, background: 'none', border: 'none', textAlign: 'left', color: 'inherit', padding: 0 }}
+                >
+                  <Avatar user={u} size={40} />
+                  <span className="who" style={{ overflow: 'hidden' }}>
+                    <strong style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis' }}>{u.displayName}</strong>
+                    <span className="muted">@{u.username}</span>
+                  </span>
+                </button>
+                {listRel[u.id] !== 'self' && (
+                  listRel[u.id] === 'following' || listRel[u.id] === 'requested' ? (
+                    <button className="ghost" onClick={() => void toggleListFollow(u)}>{listRel[u.id] === 'following' ? 'Following' : 'Requested'}</button>
+                  ) : (
+                    <button className="primary" style={{ padding: '8px 14px' }} onClick={() => void toggleListFollow(u)}>Follow</button>
+                  )
+                )}
+              </div>
             ))}
           </div>
         )}
 
         {/* Actions */}
-        {isOwner ? (
+        {blocked ? (
+          <div className="card" style={{ margin: '12px 0' }}>
+            <strong>You blocked @{profile.username}.</strong>
+            <p className="muted">You will not see each other&apos;s profiles, posts or messages.</p>
+            <button className="ghost" onClick={async () => { try { await unblockUser(profile.id); setBlocked(false); props.onRefresh(); } catch (err) { setNotice(err instanceof Error ? err.message : 'Unblock failed.'); } }}>Unblock</button>
+          </div>
+        ) : locked ? (
+          <div className="card" style={{ margin: '12px 0', textAlign: 'center' }}>
+            <div style={{ fontSize: 32 }}>🔒</div>
+            <strong>This account is private</strong>
+            <p className="muted">Follow to see their photos, Reels and Drops.</p>
+            {rel === 'requested' ? (
+              <button className="ghost" onClick={async () => { await unfollowUser(profile.id); setRel('none'); }}>Requested — tap to cancel</button>
+            ) : (
+              <button className="primary" onClick={doFollow}>Follow</button>
+            )}
+          </div>
+        ) : isOwner ? (
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', margin: '12px 0' }}>
             <button className="primary" onClick={props.onEdit}>Edit Profile</button>
             <button
@@ -174,41 +276,164 @@ export function ProfilePage(props: {
             ) : (
               <button className="primary" onClick={doFollow}>Follow</button>
             )}
-            <button className="ghost" onClick={() => props.onMessage(profile.id)}>Message</button>
+            <button className="ghost" onClick={doMessage}>Message</button>
             <button className="ghost" onClick={() => setMoreOpen((v) => !v)}>More</button>
           </div>
         )}
-        {moreOpen && !isOwner && (
+        {moreOpen && !isOwner && !blocked && !locked && (
           <div className="card" style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-            <button className="ghost" onClick={async () => { await muteUser(profile.id); setNotice(`Muted @${profile.username}. Their posts will not appear in your feed.`); setMoreOpen(false); }}>Mute</button>
-            <button className="ghost" onClick={async () => { await blockUser(profile.id); setNotice(`Blocked @${profile.username}.`); setMoreOpen(false); }}>Block</button>
-            <button className="ghost" onClick={async () => { await reportUser(profile.id, 'Inappropriate content'); setNotice('Reported. Thank you.'); setMoreOpen(false); }}>Report</button>
+            <button className="ghost" onClick={async () => { try { if (muted) { await unmuteUser(profile.id); setMuted(false); setNotice(`Unmuted @${profile.username}.`); } else { await muteUser(profile.id); setMuted(true); setNotice(`Muted @${profile.username}. Their posts will not appear in your feed.`); } } catch (err) { setNotice(err instanceof Error ? err.message : 'Could not change mute.'); } setMoreOpen(false); }}>{muted ? 'Unmute' : 'Mute'}</button>
+            <button className="ghost" onClick={async () => { try { await blockUser(profile.id); setBlocked(true); } catch (err) { setNotice(err instanceof Error ? err.message : 'Block failed.'); } setMoreOpen(false); }}>Block</button>
+            <button className="ghost" onClick={async () => { try { await reportUser(profile.id, 'Inappropriate content'); setNotice('Reported. Our team will review it.'); } catch (err) { setNotice(err instanceof Error ? err.message : 'Report failed.'); } setMoreOpen(false); }}>Report</button>
           </div>
         )}
 
-        {/* Content tabs */}
-        <div className="profile-tabs" role="tablist">
-          {(['posts', 'reels', 'drops', ...(isOwner ? ['saved'] as const : [])] as const).map((t) => (
-            <button key={t} role="tab" aria-selected={tab === t} className={tab === t ? 'active' : ''} onClick={() => setTab(t as any)}>
-              {t[0].toUpperCase() + t.slice(1)}
-            </button>
-          ))}
-        </div>
-        {tab === 'posts' && (
-          posts.length === 0 ? <p className="muted">No posts yet.</p>
-            : posts.map((p) => <div key={p.id} className="card">{p.caption}{p.mediaUrl ? <div className="post-media" style={{ fontSize: 20 }}>{p.mediaUrl}</div> : null}</div>)
+        {/* Content tabs — Instagram-style: icon + label, 3-column grid.
+            Every tile is a real record (server first); taps open the real
+            post / Reel / Drop. No placeholder tiles, no fake images:
+            posts in this app carry text + filter + effects (no photo
+            upload for posts yet), so a text tile shows the caption on the
+            post's own filter; an image tile renders the real photo. */}
+        {!locked && !blocked && (
+          <>
+            <div className="profile-tabs" role="tablist">
+              {([
+                ['posts', '▦', 'Posts'],
+                ['reels', '🎬', 'Reels'],
+                ['drops', '💧', 'Drops'],
+                ...(isOwner ? [['saved', '🔖', 'Saved']] as const : []),
+              ] as const).map(([t, icon, label]) => (
+                <button key={t} role="tab" aria-selected={tab === t} className={tab === t ? 'active' : ''} onClick={() => setTab(t as any)}>
+                  {icon} {label}
+                </button>
+              ))}
+            </div>
+            {tab === 'posts' && (
+              posts.length === 0 ? (
+                <div style={{ textAlign: 'center', padding: '24px 0' }}>
+                  <p className="muted">No posts yet.</p>
+                  {isOwner && <button className="primary" onClick={props.onCreatePost}>Create your first post</button>}
+                </div>
+              ) : (
+                <div className="profile-grid">
+                  {posts.map((p) => (
+                    <button key={p.id} type="button" className="profile-tile" onClick={() => setSelectedPost(p)} aria-label={`Open post: ${p.caption.slice(0, 40)}`}>
+                      {isImageUrl(p.mediaUrl) ? (
+                        <img src={p.mediaUrl} alt="" style={{ filter: filterCss(p.filter ?? 'original') }} />
+                      ) : (
+                        <span style={{ filter: filterCss(p.filter ?? 'original') }}>{p.caption ? p.caption.slice(0, 60) : '✦'}</span>
+                      )}
+                    </button>
+                  ))}
+                </div>
+              )
+            )}
+            {tab === 'reels' && (
+              reels.length === 0 ? (
+                <div style={{ textAlign: 'center', padding: '24px 0' }}>
+                  <p className="muted">No Reels yet.</p>
+                  {isOwner && <p className="muted">Create one from Discover → Reels.</p>}
+                </div>
+              ) : (
+                <div className="profile-grid">
+                  {reels.map((r) => (
+                    <button key={r.id} type="button" className="profile-tile" onClick={() => setSelectedReel(r)} aria-label="Open Reel">
+                      {isImageUrl(r.mediaUrl) ? <img src={r.mediaUrl} alt="" /> : <span>🎬<br />Reel</span>}
+                    </button>
+                  ))}
+                </div>
+              )
+            )}
+            {tab === 'drops' && (
+              drops.length === 0 ? (
+                <div style={{ textAlign: 'center', padding: '24px 0' }}>
+                  <p className="muted">No Drops yet.</p>
+                  {isOwner && <p className="muted">Create one from the Hub (+ Drop).</p>}
+                </div>
+              ) : (
+                <div className="profile-grid">
+                  {drops.map((d) => (
+                    <button key={d.id} type="button" className="profile-tile" onClick={() => setSelectedDrop(d)} aria-label={`Open Drop, ${d.status}`}>
+                      <span>💧<br />{d.status === 'waiting' ? 'Sealed' : d.status === 'ready' ? 'Ready to Blast' : 'Revealed'}</span>
+                    </button>
+                  ))}
+                </div>
+              )
+            )}
+            {tab === 'saved' && (
+              saved.length === 0 ? (
+                <p className="muted" style={{ textAlign: 'center', padding: '24px 0' }}>Nothing saved yet.</p>
+              ) : (
+                <div className="profile-grid">
+                  {saved.map((p) => (
+                    <button key={p.id} type="button" className="profile-tile" onClick={() => setSelectedPost(p)} aria-label={`Open saved post: ${p.caption.slice(0, 40)}`}>
+                      {isImageUrl(p.mediaUrl) ? (
+                        <img src={p.mediaUrl} alt="" style={{ filter: filterCss(p.filter ?? 'original') }} />
+                      ) : (
+                        <span style={{ filter: filterCss(p.filter ?? 'original') }}>{p.caption ? p.caption.slice(0, 60) : '✦'}</span>
+                      )}
+                    </button>
+                  ))}
+                </div>
+              )
+            )}
+          </>
         )}
-        {tab === 'reels' && (
-          reels.length === 0 ? <p className="muted">No Reels yet.</p>
-            : reels.map((r: any) => <div key={r.id} className="card">🎬 Reel — {r.mediaUrl}</div>)
+        {/* Post detail — the real post with Fire and comments. */}
+        {selectedPost && (
+          <div className="profile-modal" onClick={() => setSelectedPost(null)}>
+            <div className="profile-modal-card" onClick={(e) => e.stopPropagation()}>
+              <button className="ghost" onClick={() => setSelectedPost(null)}>✕ Close</button>
+              <PostCard
+                post={{ ...selectedPost, author: { id: profile.id, username: profile.username, displayName: profile.displayName, avatarUrl: profile.avatarUrl ?? null } }}
+                following={rel === 'following'}
+                onFollow={async (id) => { if (id === me.id) return; await followUser(id); setRel('following'); }}
+              />
+              {isOwner && (
+                <button className="ghost" style={{ marginTop: 8 }} onClick={async () => { try { await deletePost(selectedPost.id); setPosts((ps) => ps.filter((x) => x.id !== selectedPost.id)); setSelectedPost(null); } catch (err) { setNotice(err instanceof Error ? err.message : 'Delete failed.'); } }}>Delete this post</button>
+              )}
+            </div>
+          </div>
         )}
-        {tab === 'drops' && (
-          drops.length === 0 ? <p className="muted">No Drops yet.</p>
-            : drops.map((d: any) => <div key={d.id} className="card">💧 {d.caption ?? 'Sealed Drop'} — {d.status}</div>)
+        {/* Reel detail — Reels in this build carry no video upload yet,
+            so the tile is honest about that instead of faking a player. */}
+        {selectedReel && (
+          <div className="profile-modal" onClick={() => setSelectedReel(null)}>
+            <div className="profile-modal-card" onClick={(e) => e.stopPropagation()}>
+              <button className="ghost" onClick={() => setSelectedReel(null)}>✕ Close</button>
+              <div style={{ textAlign: 'center', padding: 24 }}>
+                <div style={{ fontSize: 48 }}>🎬</div>
+                <p>Reel by {profile.displayName}</p>
+                <p className="muted">{new Date(selectedReel.createdAt).toLocaleString()}</p>
+                {isImageUrl(selectedReel.mediaUrl) && <img src={selectedReel.mediaUrl} alt="" style={{ maxWidth: '100%', borderRadius: 12 }} />}
+                <p className="muted">Video upload is not available for Reels yet — this Reel was created without media.</p>
+              </div>
+            </div>
+          </div>
         )}
-        {tab === 'saved' && (
-          saved.length === 0 ? <p className="muted">Nothing saved yet.</p>
-            : saved.map((p) => <div key={p.id} className="card">{p.caption}</div>)
+        {/* Drop detail — sealed content stays sealed until blast time. */}
+        {selectedDrop && (
+          <div className="profile-modal" onClick={() => setSelectedDrop(null)}>
+            <div className="profile-modal-card" onClick={(e) => e.stopPropagation()}>
+              <button className="ghost" onClick={() => setSelectedDrop(null)}>✕ Close</button>
+              <div style={{ textAlign: 'center', padding: 16 }}>
+                <div style={{ fontSize: 48 }}>💧</div>
+                <p><strong>{selectedDrop.kind === 'protected' ? 'Protected' : 'Public'} Drop</strong> — {selectedDrop.status === 'waiting' ? 'Sealed' : selectedDrop.status === 'ready' ? 'Ready to Blast' : 'Revealed'}</p>
+                <p className="muted">Blasts {new Date(selectedDrop.blastAt).toLocaleString()}</p>
+                {selectedDrop.status === 'waiting' && selectedDrop.creatorId !== me.id ? (
+                  <p className="muted">This Drop is sealed until it Blasts.</p>
+                ) : (
+                  <>
+                    {selectedDrop.caption && <p>{selectedDrop.caption}</p>}
+                    {isImageUrl(selectedDrop.mediaUrl) && <img src={selectedDrop.mediaUrl} alt="" style={{ maxWidth: '100%', borderRadius: 12 }} />}
+                    {selectedDrop.status !== 'revealed' && (
+                      <button className="primary" onClick={async () => { try { await openDrop(selectedDrop.id); await reloadDrops(); } catch (err) { setNotice(err instanceof Error ? err.message : 'Could not open this Drop.'); } }}>Open Drop</button>
+                    )}
+                  </>
+                )}
+              </div>
+            </div>
+          </div>
         )}
         <p className="muted" style={{ marginTop: 16 }}>Signed in as {me.displayName} (@{me.username})</p>
       </div>
@@ -217,7 +442,7 @@ export function ProfilePage(props: {
 }
 
 // -------------------------------------------------------- edit profile ----
-export function EditProfilePage({ me, onBack, onSaved }: { me: User; onBack: () => void; onSaved: (u: User) => void }) {
+export function EditProfilePage({ me, onBack, onSaved, onRefresh }: { me: User; onBack: () => void; onSaved: (u: User) => void; onRefresh?: () => void }) {
   const [displayName, setDisplayName] = useState(me.displayName);
   const [username, setUsername] = useState(me.username);
   const [bio, setBio] = useState(me.bio ?? '');
@@ -227,6 +452,9 @@ export function EditProfilePage({ me, onBack, onSaved }: { me: User; onBack: () 
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
   const [confirmDiscard, setConfirmDiscard] = useState(false);
+  // Avatar preview updates immediately after an upload instead of
+  // showing the old photo until the next navigation.
+  const [avatarUrl, setAvatarUrl] = useState(me.avatarUrl ?? null);
   const dirty = displayName !== me.displayName || username !== me.username || bio !== (me.bio ?? '')
     || location !== (me.location ?? '') || birthday !== (me.birthday ?? '')
     || linksText !== (me.links ?? []).map((l) => l.url).join('\n');
@@ -264,7 +492,7 @@ export function EditProfilePage({ me, onBack, onSaved }: { me: User; onBack: () 
       )}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginTop: 12 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <Avatar user={me} size={88} />
+          <Avatar user={{ displayName: me.displayName, avatarUrl }} size={88} />
           <label className="ghost" style={{ cursor: 'pointer', fontSize: 13 }}>
             Change Profile Photo
             <input
@@ -272,7 +500,7 @@ export function EditProfilePage({ me, onBack, onSaved }: { me: User; onBack: () 
               onChange={async (e) => {
                 const f = e.target.files?.[0];
                 if (!f) return;
-                try { await uploadProfilePhoto('avatar', f); setError(''); } catch (err) { setError(err instanceof Error ? err.message : 'Upload failed.'); }
+                try { const url = await uploadProfilePhoto('avatar', f); setAvatarUrl(url); setError(''); onRefresh?.(); } catch (err) { setError(err instanceof Error ? err.message : 'Upload failed.'); }
               }}
             />
           </label>
@@ -283,7 +511,7 @@ export function EditProfilePage({ me, onBack, onSaved }: { me: User; onBack: () 
               onChange={async (e) => {
                 const f = e.target.files?.[0];
                 if (!f) return;
-                try { await uploadProfilePhoto('cover', f); setError(''); } catch (err) { setError(err instanceof Error ? err.message : 'Upload failed.'); }
+                try { await uploadProfilePhoto('cover', f); setError(''); onRefresh?.(); } catch (err) { setError(err instanceof Error ? err.message : 'Upload failed.'); }
               }}
             />
           </label>

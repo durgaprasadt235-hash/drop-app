@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { Conversation, Message, User } from '../lib/api';
 import { listMessages, sendMessage, deleteMessage, createSlashInvitation } from '../lib/api';
 
@@ -6,11 +6,13 @@ import { listMessages, sendMessage, deleteMessage, createSlashInvitation } from 
 // group is created, and when they leave it vanishes. Message delete is
 // sender-only and removes the message for everyone.
 export default function MessagesView({
-  conversations, users, me,
+  conversations, users, me, initialOpenId,
 }: {
   conversations: Conversation[];
   users: User[];
   me: User;
+  /** Open this conversation on mount — set by a profile's Message button. */
+  initialOpenId?: number | null;
 }) {
   const [openId, setOpenId] = useState<number | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
@@ -21,6 +23,11 @@ export default function MessagesView({
     setOpenId(id);
     setMessages(await listMessages(id));
   };
+
+  useEffect(() => {
+    if (initialOpenId != null) void open(initialOpenId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialOpenId]);
 
   const send = async () => {
     if (!openId || !text.trim()) return;

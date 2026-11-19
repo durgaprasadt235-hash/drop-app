@@ -75,7 +75,25 @@ export async function ensureProfileTables(sql: Sql): Promise<void> {
   await sql`CREATE TABLE IF NOT EXISTS posts (id SERIAL PRIMARY KEY, author_id INT REFERENCES users(id), caption TEXT, media_url TEXT, filter TEXT DEFAULT 'original', effect TEXT DEFAULT 'none', extras_json JSONB, fire_count INT DEFAULT 0, comment_count INT DEFAULT 0, created_at TIMESTAMPTZ DEFAULT NOW())`;
   await sql`CREATE TABLE IF NOT EXISTS reels (id SERIAL PRIMARY KEY, author_id INT REFERENCES users(id), media_url TEXT NOT NULL, created_at TIMESTAMPTZ DEFAULT NOW())`;
   await sql`CREATE TABLE IF NOT EXISTS drops (id SERIAL PRIMARY KEY, creator_id INT REFERENCES users(id), kind TEXT NOT NULL, status TEXT DEFAULT 'waiting', blast_at TIMESTAMPTZ NOT NULL, caption TEXT, media_url TEXT, created_at TIMESTAMPTZ DEFAULT NOW())`;
-  await sql`CREATE TABLE IF NOT EXISTS post_saves (user_id INT REFERENCES users(id), post_id INT REFERENCES users(id), PRIMARY KEY (user_id, post_id))`;
+  // NOTE (2026-11-19 fix): post_saves.post_id originally referenced
+  // users(id) by mistake — it must reference posts(id). The CREATE below
+  // is correct for fresh databases; the DO block underneath repairs a
+  // table that was already created with the wrong FK (idempotent).
+  await sql`CREATE TABLE IF NOT EXISTS post_saves (user_id INT REFERENCES users(id), post_id INT REFERENCES posts(id), PRIMARY KEY (user_id, post_id))`;
+  await sql`
+    DO $$ BEGIN
+      IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'post_saves_post_id_fkey' AND conrelid = 'post_saves'::regclass AND confrelid <> 'posts'::regclass) THEN
+        ALTER TABLE post_saves DROP CONSTRAINT post_saves_post_id_fkey;
+      END IF;
+      IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'post_saves_post_id_fkey') THEN
+        ALTER TABLE post_saves ADD CONSTRAINT post_saves_post_id_fkey FOREIGN KEY (post_id) REFERENCES posts(id) ON DELETE CASCADE;
+      END IF;
+    END $$`;
+  await sql`CREATE TABLE IF NOT EXISTS drop_opens (drop_id INT REFERENCES drops(id), user_id INT REFERENCES users(id), opened_at TIMESTAMPTZ DEFAULT NOW(), PRIMARY KEY (drop_id, user_id))`;
+  await sql`CREATE TABLE IF NOT EXISTS reports (id SERIAL PRIMARY KEY, reporter_id INT REFERENCES users(id), target_id INT REFERENCES users(id), reason TEXT, created_at TIMESTAMPTZ DEFAULT NOW())`;
+  await sql`CREATE TABLE IF NOT EXISTS conversations (id SERIAL PRIMARY KEY, created_at TIMESTAMPTZ DEFAULT NOW())`;
+  await sql`CREATE TABLE IF NOT EXISTS conversation_members (conversation_id INT REFERENCES conversations(id), user_id INT REFERENCES users(id), joined_at TIMESTAMPTZ DEFAULT NOW(), PRIMARY KEY (conversation_id, user_id))`;
+  await sql`CREATE TABLE IF NOT EXISTS messages (id SERIAL PRIMARY KEY, conversation_id INT REFERENCES conversations(id), sender_id INT REFERENCES users(id), body TEXT NOT NULL, created_at TIMESTAMPTZ DEFAULT NOW())`;
   await sql`CREATE TABLE IF NOT EXISTS notifications (id SERIAL PRIMARY KEY, user_id INT REFERENCES users(id), type TEXT NOT NULL, body TEXT NOT NULL, read BOOLEAN DEFAULT FALSE, created_at TIMESTAMPTZ DEFAULT NOW())`;
   // New tables for this module.
   await sql`
@@ -176,6 +194,10 @@ export async function getUserByUsername(sql: Sql, username: string): Promise<Ful
 const RESERVED = new Set([
   'admin', 'drop', 'support', 'system', 'official', 'help', 'security',
   'root', 'null', 'undefined', 'api', 'vercel', 'neon', 'moderator', 'mod',
+  // Route names under /api/profile/* — a user named e.g. "posts" would
+  // collide with the POST /api/profile/posts content endpoint.
+  'me', 'profile', 'posts', 'reels', 'drops', 'saved', 'save', 'report',
+  'conversations', 'messages',
 ]);
 
 export function validateUsername(username: string): string | null {
@@ -268,6 +290,24 @@ export async function pendingRequest(sql: Sql, requesterId: number, targetId: nu
   return rows.length > 0 ? rows[0].id : null;
 }
 
+/** May viewer start a DM with target? Server-side, from target's stored
+ *  who_can_message: everyone = yes, nobody = no, friends = mutual follow.
+ *  Blocked either way = no. The owner can always message themselves is
+ *  irrelevant (self-DM is rejected elsewhere); viewer === target → true. */
+export async function canMessage(sql: Sql, viewerId: number | null, target: FullDbUser): Promise<boolean> {
+  if (viewerId === null) return false;
+  if (viewerId === target.id) return true;
+  if (await isBlocked(sql, viewerId, target.id)) return false;
+  const prefs = await getPrivacy(sql, target.id);
+  if (prefs.who_can_message === 'everyone') return true;
+  if (prefs.who_can_message === 'nobody') return false;
+  const [a, b] = await Promise.all([
+    isFollowing(sql, viewerId, target.id),
+    isFollowing(sql, target.id, viewerId),
+  ]);
+  return a && b;
+}
+
 /** Can viewer see target's full profile? Owner and approved followers can; anyone can see the public summary. */
 export async function canViewFullProfile(sql: Sql, viewerId: number | null, target: FullDbUser): Promise<boolean> {
   if (viewerId === target.id) return true;
@@ -285,15 +325,19 @@ export async function profileCounts(sql: Sql, userId: number): Promise<{ posts: 
   return { posts: (p as any[])[0]?.c ?? 0, followers: (f1 as any[])[0]?.c ?? 0, following: (f2 as any[])[0]?.c ?? 0 };
 }
 
-/** Public view of a profile: private fields stripped when not allowed. */
+/** Public view of a profile: private fields stripped when not allowed.
+ *  canMessage (server-computed from the target's stored privacy prefs)
+ *  is included even for private profiles — the Message button needs it
+ *  to decide honestly whether a DM can be opened. */
 export function publicProfile(
   target: FullDbUser,
-  opts: { full: boolean; counts: { posts: number; followers: number; following: number }; relationship: 'none' | 'following' | 'requested' | 'self' },
+  opts: { full: boolean; counts: { posts: number; followers: number; following: number }; relationship: 'none' | 'following' | 'requested' | 'self'; canMessage?: boolean },
 ): Record<string, unknown> {
   const base: Record<string, unknown> = {
     id: target.id, username: target.username, displayName: target.display_name,
     avatarUrl: target.avatar_url ?? null, isPrivate: Boolean(target.is_private),
     relationship: opts.relationship, createdAt: target.created_at,
+    canMessage: opts.canMessage ?? false,
   };
   if (!opts.full) return base;
   return {

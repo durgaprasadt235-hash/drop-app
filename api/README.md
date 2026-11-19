@@ -107,9 +107,25 @@ Client contract: `src/lib/api.ts` (80 actions).
   `POST/DELETE /api/profile/follow` (private = pending request +
   notification), `POST/DELETE /api/profile/block` (removes follows
   both ways, cancels pending requests), `POST/DELETE /api/profile/mute`,
-  `GET /api/profile/lists`, `GET /api/profile/me/blocks`,
+  `GET /api/profile/lists` (each row carries the viewer's relationship
+  for the Follow buttons), `GET /api/profile/me/blocks`,
   `GET/POST/PATCH /api/clubrooms/[id]/identity` (member lists show
   ONLY room-facing identities — no user ids, emails or mappings).
+- Profile content (end-to-end, 2026-11-19): profile tabs are server-
+  backed — `GET /api/profile/<id>/posts|reels|drops` (private-profile
+  and block rules apply; sealed Drops return no caption/media except
+  to the creator), `POST /api/profile/posts|reels|drops`,
+  `DELETE /api/profile/posts?id=`, `POST /api/profile/drops/open`
+  (sealed until blast time, creator excepted),
+  `POST /api/profile/save` (toggle) + `GET /api/profile/me/saved`,
+  `POST /api/profile/report` (stored in `reports` for moderation),
+  `POST /api/profile/conversations` (find-or-create a 1:1 DM; the
+  target's stored `who_can_message` is enforced server-side, and the
+  public profile carries a server-computed `canMessage` flag).
+  `post_saves.post_id` references `posts(id)` — an earlier migration
+  wrongly referenced `users(id)`; `ensureProfileTables` repairs an
+  existing wrong FK idempotently. No Story Highlights feature exists
+  in the app, so the Profile page renders no highlights row.
   All `/api/profile/*` routes are served by ONE serverless function,
   `api/profile/[...route].ts`, which dispatches to the handlers in
   `api/lib/profile-handlers.ts` (helper file, not a function). This

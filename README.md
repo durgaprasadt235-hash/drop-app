@@ -15,7 +15,7 @@ posts, or data — every record is created by a real user in the app.
   comments), DropHub (Waiting/Ready, Blast presets), MessagesView
   (DMs + Slash), OtherViews (Reels, Clubrooms, Search, Notifications, Saved)
 - `src/lib/filters.ts` — all 32 DROP filters + 22 DROP effects, verbatim
-- `src/lib/api.ts` — typed client contract: all 80 actions (incl. Page 04 profile/privacy/room-identity)
+- `src/lib/api.ts` — typed client contract: all 83 actions (incl. Page 04 profile/privacy/room-identity, plus server-backed profile content: posts/reels/drops/saved, report, DM conversations)
 - `src/components/ProfileViews.tsx` — Page 04: full Profile page, Edit Profile, Privacy & Security, Room Identity
 - `src/lib/google.ts` — Google Identity Services loader + button
 - `api/auth/google.ts` — Vercel serverless function: verifies the

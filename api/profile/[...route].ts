@@ -23,6 +23,18 @@ import {
   handleBlocks,
   handleFollowRequestsList,
   handleFollowRequestAnswer,
+  handleProfilePosts,
+  handleProfileReels,
+  handleProfileDrops,
+  handleCreatePost,
+  handleDeletePost,
+  handleCreateReel,
+  handleCreateDrop,
+  handleOpenDrop,
+  handleSaveToggle,
+  handleSaved,
+  handleReport,
+  handleCreateConversation,
 } from '../lib/profile-handlers.js';
 
 export default async function handler(req: any, res: any): Promise<void> {
@@ -46,6 +58,27 @@ export default async function handler(req: any, res: any): Promise<void> {
   if (segments.length === 2 && a === 'me' && b === 'privacy') return handlePrivacy(req, res);
   if (segments.length === 2 && a === 'me' && b === 'blocks') return handleBlocks(req, res);
   if (segments.length === 2 && a === 'me' && b === 'follow-requests') return handleFollowRequestsList(req, res);
+  if (segments.length === 2 && a === 'me' && b === 'saved') return handleSaved(req, res);
+  // Profile content lists: /api/profile/<userId>/posts|reels|drops
+  if (segments.length === 2 && /^\d+$/.test(a) && (b === 'posts' || b === 'reels' || b === 'drops')) {
+    setQuery({ userId: Number(a) });
+    if (b === 'posts') return handleProfilePosts(req, res);
+    if (b === 'reels') return handleProfileReels(req, res);
+    return handleProfileDrops(req, res);
+  }
+  // Open a Drop: POST /api/profile/drops/open
+  if (segments.length === 2 && a === 'drops' && b === 'open') return handleOpenDrop(req, res);
+  // Content writes (single segment, dispatched on method so GET still
+  // falls through to the username lookup below).
+  if (segments.length === 1 && a === 'posts') {
+    if (req.method === 'POST') return handleCreatePost(req, res);
+    if (req.method === 'DELETE') return handleDeletePost(req, res);
+  }
+  if (segments.length === 1 && a === 'reels' && req.method === 'POST') return handleCreateReel(req, res);
+  if (segments.length === 1 && a === 'drops' && req.method === 'POST') return handleCreateDrop(req, res);
+  if (segments.length === 1 && a === 'save' && req.method === 'POST') return handleSaveToggle(req, res);
+  if (segments.length === 1 && a === 'report' && req.method === 'POST') return handleReport(req, res);
+  if (segments.length === 1 && a === 'conversations' && req.method === 'POST') return handleCreateConversation(req, res);
   if (segments.length === 2 && a === 'follow-requests') {
     setQuery({ id: b });
     return handleFollowRequestAnswer(req, res);
