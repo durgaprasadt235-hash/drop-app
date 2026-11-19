@@ -1,8 +1,16 @@
 /* DROP — clean classic luxury theme (Workstream A)
    Type: Inter, no serif anywhere. One restrained accent (DROP rose) for
-   Fire / active states only; primary actions are ink-black. No gradients. */
+   Fire / active states only; primary actions are ink-black. No gradients
+   in the general UI — the ONLY gradients are the brand mark itself:
+   the logo droplet, the story rings and the dock active ring, all on
+   Home (see "Home — dark glass" below). */
 
 :root {
+  /* Brand gradient — sampled from the approved logo droplet:
+     magenta/pink top, purple middle, orange left, cyan bottom. */
+  --drop-gradient: conic-gradient(from 210deg, #ff8a00, #ff2ea6, #7b2ff7, #00d4ff, #ff8a00);
+  --drop-ring: conic-gradient(from 135deg, #ff2ea6, #7b2ff7, #a855f7, #ff2ea6);
+  --drop-red: #ff3b30; /* notification dot */
   /* Restrained palette — light theme (default) */
   --ink: #0b1327;
   --paper: #ffffff;
@@ -119,16 +127,47 @@ button.ghost { background: transparent; border: 1px solid var(--border); border-
 
 /* ---------- Layout — mobile-first, single column ---------- */
 .app { width: 100%; max-width: 100%; margin: 0 auto; min-height: 100vh; position: relative; overflow-x: clip; }
-.header { display: flex; align-items: center; justify-content: space-between; height: 56px; padding: 0 16px; border-bottom: 1px solid var(--border); position: sticky; top: 0; background: var(--bg); z-index: 10; }
-.logo { margin: 0; cursor: pointer; }
+/* Header — 3-column grid so the logo lockup is exactly centred: the two
+   side clusters are equal width, the centre is auto. */
+.header { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; height: 56px; padding: 0 16px; border-bottom: 1px solid var(--border); position: sticky; top: 0; background: var(--bg); z-index: 10; }
+.header-side { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.header-side.left { justify-content: flex-start; }
+.header-side.right { justify-content: flex-end; }
+.header-side:first-child { justify-content: flex-start; }
+.header-side:last-child { justify-content: flex-end; }
+/* Logo lockup — gradient droplet mark + Inter 700 letterspaced wordmark. */
+.logo { margin: 0; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px; justify-self: center; }
 .logo span { color: inherit; }
+.logo-mark { flex: 0 0 auto; width: 32px; height: 32px; border-radius: 50%; background: var(--drop-gradient); display: inline-flex; align-items: center; justify-content: center; overflow: hidden; }
+.logo-mark svg { width: 100%; height: 100%; display: block; }
+.logo-text { font-size: 24px; line-height: 28px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; color: inherit; white-space: nowrap; }
+/* Header icon buttons (bell, messages, search) — plain round buttons. */
+.icon-btn { background: transparent; border: none; color: inherit; min-width: 44px; min-height: 44px; display: inline-flex; align-items: center; justify-content: center; border-radius: 50%; padding: 0; }
+.bell-wrap { position: relative; display: inline-flex; align-items: center; justify-content: center; }
+/* 8px red dot, top-right of the bell. Styled only — the TSX renders this
+   element only when there is an unread notification; never forced visible. */
+.bell-dot { position: absolute; top: 7px; right: 7px; width: 8px; height: 8px; border-radius: 50%; background: var(--drop-red); border: 1px solid rgba(255, 255, 255, 0.7); pointer-events: none; }
 .stories { display: flex; gap: 12px; overflow-x: auto; padding: 12px 16px; scrollbar-width: none; }
 .stories::-webkit-scrollbar { display: none; }
-.story-circle { flex: 0 0 auto; width: 72px; height: 72px; border-radius: 50%; border: 3px solid var(--accent); display: flex; align-items: center; justify-content: center; font-size: 24px; background: var(--surface); }
-.story-circle.yours { border-style: dashed; }
-.pill-bar { display: flex; height: 64px; border: 1px solid var(--border); border-radius: 32px; margin: 8px 16px; overflow: hidden; }
-.pill-bar button { flex: 1; border: none; background: transparent; }
-.pill-bar button.active { background: var(--surface); color: var(--accent); }
+/* Story circles — 72px, gradient ring on EVERY circle including the +
+   add circle. Gradient-border technique: the gradient is the border-box
+   layer, the inner disc is the padding-box layer, so the ring itself is
+   the gradient and the photo/initial shows inside it. */
+.story-circle { flex: 0 0 auto; width: 72px; height: 72px; border-radius: 50%; border: 3px solid transparent; background: linear-gradient(rgba(11, 19, 39, 0.45), rgba(11, 19, 39, 0.45)) padding-box, var(--drop-gradient) border-box; display: flex; align-items: center; justify-content: center; font-size: 24px; color: #fff; }
+.story-circle img { width: 100%; height: 100%; object-fit: cover; border-radius: 50%; display: block; }
+.story-circle.yours { border: 3px solid transparent; background: linear-gradient(rgba(11, 19, 39, 0.45), rgba(11, 19, 39, 0.45)) padding-box, var(--drop-gradient) border-box; }
+/* Glass shortcut pill — translucent white blur over the photo, icon
+   stacked above its label, chevron at the right end. */
+.pill-bar { display: flex; align-items: stretch; height: 64px; background: rgba(255, 255, 255, 0.16); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px); border: 1px solid rgba(255, 255, 255, 0.35); border-radius: 32px; margin: 8px 16px; overflow: hidden; color: #fff; }
+.pill-bar button { flex: 1; border: none; background: transparent; color: #fff; }
+.pill-item { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; padding: 6px 4px; color: #fff; }
+.pill-item + .pill-item { border-left: 1px solid rgba(255, 255, 255, 0.25); }
+.pill-icon { width: 20px; height: 20px; display: flex; align-items: center; justify-content: center; color: #fff; }
+.pill-icon svg { width: 20px; height: 20px; }
+.pill-label { font-size: 13px; line-height: 18px; font-weight: 600; color: #fff; white-space: nowrap; }
+/* Active shortcut stays legible: a brighter glass, white text. */
+.pill-bar button.active, .pill-item.active { background: rgba(255, 255, 255, 0.28); color: #fff; }
+.pill-chevron { flex: 0 0 auto; display: flex; align-items: center; justify-content: center; padding: 0 14px 0 8px; color: #fff; background: transparent; border: none; border-left: 1px solid rgba(255, 255, 255, 0.25); }
 .card { border-bottom: 1px solid var(--border); border-radius: 12px; padding: 16px; }
 .avatar { width: 40px; height: 40px; border-radius: 50%; background: var(--ink); color: #fff; display: inline-flex; align-items: center; justify-content: center; font-weight: 700; }
 .post-media { width: 100%; aspect-ratio: 4 / 3; border-radius: 12px; display: flex; align-items: center; justify-content: center; font-size: 48px; background: var(--surface); margin: 10px 0; }
@@ -136,37 +175,66 @@ button.ghost { background: transparent; border: 1px solid var(--border); border-
 .engagement button { background: none; border: none; font-size: 20px; }
 .fire-on { color: var(--fire); }
 
-/* ---------- Dock — fixed capsule (no ball, no blur glass) ---------- */
+/* ---------- Home — full-bleed feed (PostCard) ---------- */
+/* Edge-to-edge, no card chrome, no white background, no border/radius. */
+.post-card.fullbleed { border: none; border-radius: 0; padding: 0; margin: 0; background: transparent; }
+.post-media-wrap { position: relative; width: 100%; background: var(--dark-bg); }
+.post-media-img { width: 100%; display: block; object-fit: cover; }
+/* Bottom overlay — dark gradient from transparent to deep navy so the
+   white creator row, caption and engagement row stay legible. */
+.post-overlay { position: absolute; left: 0; right: 0; bottom: 0; padding: 56px 16px 16px; background: linear-gradient(to top, rgba(11, 19, 39, 0.85), rgba(11, 19, 39, 0)); color: #fff; }
+.post-creator-row { display: flex; align-items: center; gap: 10px; color: #fff; }
+.post-creator-row .avatar { border: 2px solid rgba(255, 255, 255, 0.8); flex: 0 0 auto; }
+.post-creator-row .post-username { font-size: 15px; line-height: 22px; font-weight: 650; color: #fff; }
+.post-creator-row .muted { color: rgba(255, 255, 255, 0.75); }
+/* Follow pill over the photo — outlined glass pill, white text. */
+.post-creator-row button { background: rgba(255, 255, 255, 0.12); border: 1px solid rgba(255, 255, 255, 0.6); color: #fff; border-radius: 999px; padding: 6px 14px; min-height: 32px; font-size: 13px; line-height: 18px; }
+.post-caption { color: #fff; font-size: 15px; line-height: 22px; margin: 8px 0 0; }
+.post-engagement { display: flex; gap: 16px; align-items: center; margin-top: 12px; color: #fff; }
+.post-engagement button { background: none; border: none; color: #fff; font-size: 15px; line-height: 22px; display: inline-flex; align-items: center; gap: 6px; padding: 0; min-height: 44px; }
+.post-engagement .fire-on { color: var(--fire); }
+/* Text-only posts — an honest solid deep-navy panel, NOT a fake photo
+   and NOT a placeholder image. Text displays cleanly at a comfortable
+   height. */
+.post-text-panel { background: #0b1327; color: #fff; min-height: 320px; display: flex; align-items: center; justify-content: center; text-align: center; padding: 48px 20px; font-size: 17px; line-height: 26px; font-weight: 500; }
+
+/* ---------- Dock — vertical GLASS pill (global, Home-approved) ---------- */
 .dock-panel {
   position: fixed; z-index: 50; width: 56px; height: 296px;
   right: 12px; bottom: calc(20px + env(safe-area-inset-bottom, 0px));
-  border-radius: 16px;
-  background: rgba(255, 255, 255, 0.96);
-  border: 1px solid var(--hairline);
-  box-shadow: 0 8px 24px rgba(11, 19, 39, 0.12);
+  border-radius: 28px;
+  background: rgba(11, 19, 39, 0.45);
+  backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  box-shadow: 0 8px 24px rgba(11, 19, 39, 0.25);
   display: flex; flex-direction: column; align-items: center; justify-content: space-evenly;
+  color: #fff;
 }
-.dock-panel button { position: relative; background: none; border: none; min-width: 44px; min-height: 44px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; padding: 0; }
-.dock-panel button.active { transform: none; }
-.dock-panel button.active::after {
-  content: ''; position: absolute; bottom: 2px; left: 50%;
-  width: 4px; height: 4px; margin-left: -2px; border-radius: 50%;
-  background: var(--accent);
+.dock-panel button, .dock-panel .dock-item { position: relative; background: none; border: none; min-width: 44px; min-height: 44px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; padding: 0; color: #fff; }
+/* Active icon sits inside a PURPLE GRADIENT RING (gradient-border
+   technique, same as the story rings). The old rose-dot treatment is
+   gone. The 300ms magnification is transform-based in TSX and untouched. */
+.dock-panel button.active, .dock-panel .dock-item.active {
+  transform: none;
+  width: 44px; height: 44px; min-width: 44px; min-height: 44px;
+  border-radius: 50%; border: 2px solid transparent;
+  background: linear-gradient(rgba(11, 19, 39, 0), rgba(11, 19, 39, 0)) padding-box, var(--drop-ring) border-box;
 }
-.dock-icon { width: 22px; height: 22px; color: var(--ink); }
-.dock-panel button.active .dock-icon { color: var(--ink); }
+.dock-icon { width: 22px; height: 22px; color: #fff; }
+.dock-panel button.active .dock-icon, .dock-panel .dock-item.active .dock-icon { color: #fff; }
 .dock-badge {
   position: absolute; top: 6px; right: 6px; width: 8px; height: 8px;
-  border-radius: 50%; background: var(--accent); border: 2px solid var(--paper);
+  border-radius: 50%; background: var(--accent); border: 2px solid rgba(11, 19, 39, 0.6);
 }
-.dock-label { font-size: 10px; line-height: 12px; font-weight: 600; color: var(--muted); text-align: center; }
+.dock-label { font-size: 10px; line-height: 12px; font-weight: 600; color: #fff; text-align: center; }
 /* Panel label sits BESIDE its icon (outside the capsule), not beneath
    it: to the left when the capsule is docked right, to the right when
-   docked left. The desktop rail keeps its beneath-icon label. */
+   docked left. Dark pill so it stays readable over the photo. The
+   desktop rail keeps its beneath-icon label. */
 .dock-panel .dock-label {
   position: absolute; top: 50%; right: calc(100% + 10px); transform: translateY(-50%);
-  white-space: nowrap; background: var(--paper); border: 1px solid var(--hairline);
-  border-radius: 999px; padding: 4px 8px; box-shadow: 0 4px 12px rgba(11, 19, 39, 0.12); z-index: 60;
+  white-space: nowrap; background: rgba(11, 19, 39, 0.85); border: 1px solid rgba(255, 255, 255, 0.25);
+  border-radius: 999px; padding: 4px 8px; box-shadow: 0 4px 12px rgba(11, 19, 39, 0.25); z-index: 60; color: #fff;
 }
 .dock-panel.dock-left .dock-label { right: auto; left: calc(100% + 10px); }
 .dock-rail { display: none; }
@@ -205,30 +273,53 @@ body.dark .notice { background: #3a2f10; }
 .filter-strip button { flex: 0 0 auto; border: 1px solid var(--border); background: var(--surface); border-radius: 10px; padding: 8px 12px; }
 .filter-strip button.active { border-color: var(--accent); color: var(--accent); }
 
+/* ---------- Home — dark glass (Home ONLY) ----------
+   Coordination hook: the TSX worker puts class "home" on the Home view
+   container (e.g. <div className="app home"> when view === 'home').
+   The :has(.logo-mark) selectors below are a fallback so the dark
+   treatment also attaches as soon as the new logo lockup renders.
+   Other screens keep the clean-luxury system untouched. */
+.home { background: #0b1327; }
+.home .header,
+.header:has(.logo-mark),
+body.dark .home .header,
+body.dark .header:has(.logo-mark) {
+  background: linear-gradient(to bottom, rgba(11, 19, 39, 0.6), rgba(11, 19, 39, 0));
+  border-bottom-color: transparent;
+  color: #fff;
+}
+.home .logo-text,
+.header:has(.logo-mark) .logo-text { color: #fff; }
+.home .header .icon-btn { color: #fff; }
+.home .header button.ghost { color: #fff; border-color: rgba(255, 255, 255, 0.35); background: transparent; }
+
 /* ---------- Dark theme (structure unchanged) ---------- */
 body.dark { background: var(--dark-bg); color: var(--dark-text); }
 body.dark .card, body.dark .pill-bar, body.dark .header { background: var(--dark-bg); color: var(--dark-text); border-color: var(--dark-border); }
 body.dark .muted { color: var(--dark-muted); }
 body.dark h3 { color: var(--dark-muted); }
 body.dark .dock-label { color: var(--dark-muted); }
-body.dark .dock-panel .dock-label { background: var(--dark-bg); border-color: var(--dark-border); }
+body.dark .dock-panel .dock-label { background: rgba(11, 19, 39, 0.85); border-color: rgba(255, 255, 255, 0.25); color: #fff; }
 body.dark input, body.dark textarea { background: #131e38; color: #fff; border-color: var(--dark-border); }
 body.dark button.primary { background: #ffffff; color: var(--ink); }
 body.dark .avatar { background: #ffffff; color: var(--ink); border: 1px solid var(--dark-border); }
 body.dark .profile-cover, body.dark .profile-tile { background: #131e38; color: var(--dark-text); }
 body.dark .pill-bar button.active { background: #131e38; }
 body.dark .filter-strip button { background: #131e38; }
-body.dark .dock-panel { background: rgba(11, 19, 39, 0.96); border-color: var(--dark-border); }
-body.dark .dock-icon { color: var(--dark-text); }
-body.dark .dock-panel button.active .dock-icon { color: var(--dark-text); }
-body.dark .dock-badge { border-color: var(--dark-bg); }
+body.dark .dock-panel { background: rgba(11, 19, 39, 0.45); border-color: rgba(255, 255, 255, 0.25); }
+body.dark .dock-icon { color: #fff; }
+body.dark .dock-panel button.active .dock-icon, body.dark .dock-panel .dock-item.active .dock-icon { color: #fff; }
+body.dark .dock-badge { border-color: rgba(11, 19, 39, 0.6); }
 body.dark .dock-rail { background: var(--dark-bg); border-right-color: var(--dark-border); }
+body.dark .dock-rail .dock-icon { color: #fff; }
+body.dark .dock-rail .dock-label { color: var(--dark-muted); }
 
 /* ---------- Responsive breakpoints ---------- */
 /* Phone (<=640px): single 100% column, 16px gutters, header 56px.
    Smaller display / title / section / stat sizes at this width. */
 @media (max-width: 640px) {
   h1, .logo { font-size: 20px; line-height: 24px; }
+  .logo-text { font-size: 20px; line-height: 24px; }
   h2 { font-size: 18px; line-height: 24px; }
   h3 { font-size: 13px; line-height: 18px; }
   .stat-number, .profile-stats button strong { font-size: 16px; line-height: 20px; }
@@ -258,13 +349,22 @@ body.dark .dock-rail { background: var(--dark-bg); border-right-color: var(--dar
     background: var(--paper); border-right: 1px solid var(--hairline);
   }
   .dock-rail button { position: relative; background: none; border: none; min-width: 44px; min-height: 44px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; padding: 0; }
-  .dock-rail button.active { transform: none; }
-  .dock-rail button.active::after {
-    content: ''; position: absolute; bottom: 2px; left: 50%;
-    width: 4px; height: 4px; margin-left: -2px; border-radius: 50%;
-    background: var(--accent);
+  /* Rail active uses the same purple gradient ring as the glass dock —
+     the old rose dot is gone. */
+  .dock-rail button.active {
+    transform: none;
+    width: 44px; height: 44px; min-width: 44px; min-height: 44px;
+    border-radius: 50%; border: 2px solid transparent;
+    background: linear-gradient(rgba(255, 255, 255, 0), rgba(255, 255, 255, 0)) padding-box, var(--drop-ring) border-box;
   }
-  .dock-rail .dock-label { opacity: 0; transition: opacity 150ms ease; }
+  /* Side-panel logo tile — dark-navy rounded square, gradient droplet
+     icon only (no wordmark). */
+  .rail-logo { width: 48px; height: 48px; flex: 0 0 auto; background: #0b1327; border-radius: 14px; display: flex; align-items: center; justify-content: center; margin-bottom: 8px; }
+  .rail-logo .logo-mark { width: 28px; height: 28px; }
+  .dock-rail .dock-label { opacity: 0; transition: opacity 150ms ease; color: var(--muted); }
+  /* Rail icons stay ink on the light rail (the glass dock's white icons
+     do not apply here); dark theme flips them white, see below. */
+  .dock-rail .dock-icon { color: var(--ink); }
   .dock-rail button:hover .dock-label, .dock-rail button:focus-visible .dock-label { opacity: 1; }
   .dock-rail button.active .dock-icon { color: var(--ink); }
 }

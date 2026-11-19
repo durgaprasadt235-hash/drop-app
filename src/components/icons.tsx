@@ -4,6 +4,7 @@
 // rose (#D92D5E), the droplet fills solid ink (currentColor).
 
 import type { ReactNode } from 'react';
+import { useId } from 'react';
 
 export type IconProps = {
   size?: number;
@@ -61,6 +62,62 @@ export function IconDrop(props: IconProps) {
     <Svg {...props}>
       <path d="M12 22a7 7 0 0 0 7-7c0-2-1-3.9-3-5.5s-3.5-4-4-6.5c-.5 2.5-2 4.9-4 6.5C6 11.1 5 13 5 15a7 7 0 0 0 7 7z" />
     </Svg>
+  );
+}
+
+// LogoDrop — the approved gradient-swirl droplet brand mark (see the
+// approved Home reference images). This is a FILLED gradient mark, not
+// the thin-line IconDrop nav icon above (which stays exactly as-is as
+// the DROP Hub nav icon). Sampled from the reference: magenta/pink at
+// the top, purple through the middle, orange along the left edge, cyan
+// at the bottom, with a teardrop cut out of the centre so the
+// background shows through (mask, so it works on light and dark
+// surfaces). Gradient ids are per-instance (useId) so the mark can be
+// used twice on one page (header + desktop rail) without id clashes.
+export function LogoDrop({ size = 28, className }: IconProps) {
+  const uid = useId().replace(/[^a-zA-Z0-9]/g, '');
+  const swirl = `drop-swirl-${uid}`;
+  const edge = `drop-edge-${uid}`;
+  const clip = `drop-clip-${uid}`;
+  const hole = `drop-hole-${uid}`;
+  const outer = 'M12 22a7 7 0 0 0 7-7c0-2-1-3.9-3-5.5s-3.5-4-4-6.5c-.5 2.5-2 4.9-4 6.5C6 11.1 5 13 5 15a7 7 0 0 0 7 7z';
+  const inner = 'M12 7.5C11.4 9.4 10.2 10.6 9 11.6 7.7 12.7 7.4 13.9 7.4 14.6A4.6 4.6 0 0 0 12 19.2 4.6 4.6 0 0 0 16.6 14.6C16.6 13.9 16.3 12.7 15 11.6 13.8 10.6 12.6 9.4 12 7.5Z';
+  // Orange sliver down the droplet's left edge (clipped to the droplet).
+  const leftEdge = 'M12 2C11 5 8.5 7.5 7 9.5 5.5 11.8 5 13.2 5 15A7 7 0 0 0 9.5 21.5C7.8 19 7 16.5 7.6 13.8 8.3 10.8 10.2 6.5 12 2Z';
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      className={className}
+      aria-hidden="true"
+      style={{ display: 'inline-block', verticalAlign: 'middle', flex: 'none' }}
+    >
+      <defs>
+        <linearGradient id={swirl} x1="0" y1="0" x2="0.9" y2="1">
+          <stop offset="0%" stopColor="#FF2E9A" />
+          <stop offset="35%" stopColor="#8B2FF7" />
+          <stop offset="65%" stopColor="#3D7BFA" />
+          <stop offset="100%" stopColor="#00D9C0" />
+        </linearGradient>
+        <linearGradient id={edge} x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor="#FFB300" />
+          <stop offset="45%" stopColor="#FF6A00" />
+          <stop offset="100%" stopColor="#FF2E9A" />
+        </linearGradient>
+        <clipPath id={clip}>
+          <path d={outer} />
+        </clipPath>
+        <mask id={hole}>
+          <rect x="0" y="0" width="24" height="24" fill="#fff" />
+          <path d={inner} fill="#000" />
+        </mask>
+      </defs>
+      <g mask={`url(#${hole})`}>
+        <path d={outer} fill={`url(#${swirl})`} />
+        <path d={leftEdge} fill={`url(#${edge})`} clipPath={`url(#${clip})`} />
+      </g>
+    </svg>
   );
 }
 
@@ -219,6 +276,27 @@ export function IconGrid(props: IconProps) {
   );
 }
 
+export function IconCalendar(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <rect x="3" y="4" width="18" height="18" rx="2" />
+      <path d="M16 2v4" />
+      <path d="M8 2v4" />
+      <path d="M3 10h18" />
+    </Svg>
+  );
+}
+
+export function IconLayers(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <path d="m12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83Z" />
+      <path d="m22 17.65-9.17 4.16a2 2 0 0 1-1.66 0L2 17.65" />
+      <path d="m22 12.65-9.17 4.16a2 2 0 0 1-1.66 0L2 12.65" />
+    </Svg>
+  );
+}
+
 export function IconFilm(props: IconProps) {
   return (
     <Svg {...props}>
@@ -275,6 +353,14 @@ export function IconChevronLeft(props: IconProps) {
   return (
     <Svg {...props}>
       <path d="m15 18-6-6 6-6" />
+    </Svg>
+  );
+}
+
+export function IconChevronRight(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <path d="m9 18 6-6-6-6" />
     </Svg>
   );
 }

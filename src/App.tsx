@@ -22,7 +22,7 @@ import PostCard from './components/PostCard';
 import DropHub from './components/DropHub';
 import MessagesView from './components/MessagesView';
 import { ReelsView, ClubroomsView, SearchView, NotificationsView, SavedView } from './components/OtherViews';
-import { IconBell, IconPlus, IconHome, IconReels, IconDrop, IconSearch, IconProfile, IconMessages } from './components/icons';
+import { IconBell, IconPlus, IconHome, IconReels, IconDrop, IconSearch, IconProfile, IconMessages, IconGrid, IconCalendar, IconLayers, IconFire, IconChevronRight, LogoDrop } from './components/icons';
 import type { IconProps } from './components/icons';
 import type { ComponentType } from 'react';
 
@@ -34,7 +34,6 @@ const NAV: { id: View; label: string; Icon: ComponentType<IconProps> }[] = [
   { id: 'hub', label: 'DROP Hub', Icon: IconDrop },
   { id: 'search', label: 'Search', Icon: IconSearch },
   { id: 'profile', label: 'Profile', Icon: IconProfile },
-  { id: 'messages', label: 'Messages', Icon: IconMessages },
 ];
 
 export default function App() {
@@ -47,7 +46,6 @@ export default function App() {
   const [users, setUsers] = useState<User[]>([]);
   const [conversations, setConversations] = useState<{ id: number; memberIds: number[] }[]>([]);
   const [unread, setUnread] = useState(0);
-  const [unreadMessages, setUnreadMessages] = useState(0);
   const [shortcut, setShortcut] = useState<'my' | 'scheduled' | 'active' | 'trending'>('my');
   const [following, setFollowing] = useState<Set<number>>(new Set());
   const [viewerIndex, setViewerIndex] = useState<number | null>(null);
@@ -110,7 +108,7 @@ export default function App() {
     setDrops(await listDrops());
     setUsers(await listUsers());
     try { setConversations(await listConversations()); } catch { setConversations([]); }
-    try { const counts = await getUnreadCounts(); setUnread(counts.notifications); setUnreadMessages(counts.messages); } catch { setUnread(0); setUnreadMessages(0); }
+    try { const counts = await getUnreadCounts(); setUnread(counts.notifications); } catch { setUnread(0); }
   }, []);
 
   useEffect(() => {
@@ -325,7 +323,7 @@ export default function App() {
     <button
       key={n.id}
       type="button"
-      className={view === n.id ? 'active' : ''}
+      className={`dock-item${view === n.id ? ' active' : ''}`}
       aria-label={n.label}
       aria-current={view === n.id ? 'page' : undefined}
       onPointerDown={onDockPointerDown(i)}
@@ -340,7 +338,6 @@ export default function App() {
       <span className="dock-icon" style={iconScale(i)}>
         <n.Icon size={22} filled={view === n.id} />
       </span>
-      {n.id === 'messages' && unreadMessages > 0 && <span className="dock-badge" aria-hidden="true" />}
       {(alwaysShowLabel || magnified === i || hovered === i) && <span className="dock-label">{n.label}</span>}
     </button>
   ));
@@ -401,14 +398,22 @@ export default function App() {
   const visibleFeed = shortcut === 'trending' ? [...feed].sort((a, b) => b.fireCount - a.fireCount) : feed;
 
   return (
-    <div className="app">
+    <div className={view === 'home' ? 'app home' : 'app'}>
       <header className="header">
-        <button className="ghost" onClick={() => setView('clubrooms')}>Clubs</button>
-        <div className="logo" onClick={() => setView('home')}>D<span>R</span>OP</div>
-        <span style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+        <div className="header-side">
+          <button className="ghost" onClick={() => setView('clubrooms')}><IconGrid size={22} />Clubs</button>
+        </div>
+        <div className="logo" onClick={() => setView('home')}>
+          <span className="logo-mark"><LogoDrop size={28} /></span>
+          <span className="logo-text">DROP®</span>
+        </div>
+        <div className="header-side">
+          <button className="ghost" onClick={() => setView('notifications')} aria-label="Notifications">
+            <span className="bell-wrap"><IconBell size={22} />{unread > 0 && <span className="bell-dot" aria-hidden="true" />}</span>
+          </button>
+          <button className="ghost" onClick={() => setView('messages')} aria-label="Messages"><IconMessages size={22} /></button>
           <button className="ghost" onClick={() => setDark((d) => !d)}>{dark ? 'White' : 'Dark'}</button>
-          <button className="ghost" onClick={() => setView('notifications')} aria-label="Notifications"><IconBell size={22} />{unread > 0 ? ` ${unread}` : ''}</button>
-        </span>
+        </div>
       </header>
 
       {view === 'home' && (
@@ -422,13 +427,17 @@ export default function App() {
 
           <div className="pill-bar">
             {([
-              ['my', 'My Drops'],
-              ['scheduled', 'Scheduled'],
-              ['active', 'Active'],
-              ['trending', 'Trending'],
-            ] as const).map(([id, label]) => (
-              <button key={id} className={shortcut === id ? 'active' : ''} onClick={() => setShortcut(id)}>{label}</button>
+              ['my', 'My Drops', IconDrop, false],
+              ['scheduled', 'Scheduled', IconCalendar, false],
+              ['active', 'Active', IconLayers, false],
+              ['trending', 'Trending', IconFire, true],
+            ] as const).map(([id, label, PillIcon, filled]) => (
+              <button key={id} className={`pill-item${shortcut === id ? ' active' : ''}`} onClick={() => setShortcut(id)}>
+                <span className="pill-icon"><PillIcon size={20} filled={filled} /></span>
+                <span className="pill-label">{label}</span>
+              </button>
             ))}
+            <button type="button" className="pill-chevron" aria-label="More Drops" onClick={() => setView('hub')}><IconChevronRight size={20} /></button>
           </div>
 
           <div style={{ display: 'flex', gap: 8, padding: '0 12px' }}>
@@ -587,6 +596,7 @@ export default function App() {
         </div>
       ) : (
         <nav className="dock-rail" aria-label="Navigation">
+          <div className="rail-logo" aria-hidden="true"><LogoDrop size={40} /></div>
           {renderDockButtons(true)}
         </nav>
       )}
