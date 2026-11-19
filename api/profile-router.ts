@@ -60,6 +60,7 @@ import {
   handleMessageRequestsList,
   handleMessageRequestAnswer,
   handlePostComments,
+  handleRevokeSession,
   handleSlashCreate,
   handleSlashAnswer,
   handleSlashLeave,
@@ -155,6 +156,7 @@ export default async function handler(req: any, res: any): Promise<void> {
   if (segments.length === 1 && a === 'save' && req.method === 'POST') return handleSaveToggle(req, res);
   if (segments.length === 1 && a === 'report' && req.method === 'POST') return handleReport(req, res);
   if (segments.length === 1 && a === 'conversations' && req.method === 'POST') return handleCreateConversation(req, res);
+  if (segments.length === 1 && a === 'revoke-session' && req.method === 'POST') return handleRevokeSession(req, res);
   if (segments.length === 2 && a === 'follow-requests') {
     setQuery({ id: b });
     return handleFollowRequestAnswer(req, res);

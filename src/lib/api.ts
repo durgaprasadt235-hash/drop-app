@@ -580,7 +580,23 @@ async function serverFetch(path: string, init?: RequestInit): Promise<any> {
     headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}), ...(init?.headers ?? {}) },
   });
   const data = (await res.json().catch(() => ({}))) as any;
-  if (!res.ok) throw new Error(data.error ?? `Request failed (${res.status}).`);
+  if (!res.ok) {
+    // A dead server session must never strand the user: clear it and
+    // send them back to sign-in instead of failing every screen with
+    // the raw server error. (Sign-ins from before the Neon DB was
+    // connected hold tokens with no server row, so signing in again
+    // with Google is the only way back for them.)
+    if (res.status === 401 && data.error === 'Invalid or expired session.') {
+      currentUserId = null;
+      try {
+        localStorage.removeItem('drop-app-user-id');
+        localStorage.removeItem('drop-app-session');
+      } catch { /* storage may be unavailable */ }
+      try { window.dispatchEvent(new Event('drop:session-expired')); } catch { /* non-DOM env */ }
+      throw new Error('Your session has expired. Please sign in again with Google.');
+    }
+    throw new Error(data.error ?? `Request failed (${res.status}).`);
+  }
   return data;
 }
 
@@ -1279,6 +1295,10 @@ export async function getSessionUser(): Promise<User | null> {
 }
 
 export async function revokeSession(): Promise<void> {
+  // Revoke server-side first (best-effort): previously this only
+  // cleared local storage while the server token stayed valid for its
+  // full 30 days.
+  try { await serverFetch('/api/profile/revoke-session', { method: 'POST' }); } catch { /* local sign-out still proceeds */ }
   currentUserId = null;
   localStorage.removeItem('drop-app-user-id');
   localStorage.removeItem('drop-app-session');

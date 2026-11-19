@@ -1,6 +1,7 @@
 import {
   HttpError,
   audit,
+  bearerToken,
   canMessage,
   canViewFullProfile,
   containsHiddenWord,
@@ -31,7 +32,7 @@ import {
   validateUsername,
 } from './profile.js';
 import type { Sql } from './profile.js';
-import { validateDbSession } from './db.js';
+import { hashToken, validateDbSession } from './db.js';
 import { put } from '@vercel/blob';
 
 // --- from api/profile/me.ts ---
@@ -128,6 +129,27 @@ export async function handleMe(req: any, res: any): Promise<void> {
         isPrivate: Boolean(u.is_private), createdAt: u.created_at,
       },
     });
+  } catch (err) {
+    handleError(res, err);
+  }
+}
+
+// --- POST /api/profile/revoke-session ---
+// Revokes the caller's own server session (marks revoked_at). Used by
+// sign-out: previously sign-out only cleared local storage while the
+// server token stayed valid for its full 30 days.
+export async function handleRevokeSession(req: any, res: any): Promise<void> {
+  try {
+    if (req.method !== 'POST') {
+      res.setHeader('Allow', 'POST');
+      res.status(405).json({ ok: false, error: 'Method not allowed.' });
+      return;
+    }
+    const { sql, me } = await requireAuth(req);
+    const token = bearerToken(req);
+    await sql`UPDATE auth_sessions SET revoked_at = NOW() WHERE session_hash = ${hashToken(token)}`;
+    await audit(sql, me.id, 'session_revoked', '');
+    res.status(200).json({ ok: true });
   } catch (err) {
     handleError(res, err);
   }

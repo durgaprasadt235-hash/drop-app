@@ -106,6 +106,18 @@ export default function App() {
     void getAuthStatus().then((s) => { setDbConfigured(s.dbConfigured); setAuthStatus(s); });
   }, []);
 
+  // A dead server session (e.g. signed in before the shared DB was
+  // connected) returns the user to the sign-in screen with a plain
+  // message, instead of failing every screen with a raw server error.
+  useEffect(() => {
+    const onExpired = () => {
+      setMe(null);
+      setAuthError('Your session has expired. Please sign in again with Google.');
+    };
+    window.addEventListener('drop:session-expired', onExpired);
+    return () => window.removeEventListener('drop:session-expired', onExpired);
+  }, []);
+
   // Apply saved settings that affect the whole app shell (reduce motion).
   useEffect(() => {
     if (!me) return;
