@@ -5,7 +5,9 @@ import {
   getSessionUser, revokeSession,
   listFeed, listStories, createStory, createPost, listDrops, listUsers,
   listConversations, getUnreadCounts, followUser, getAuthStatus,
+  getAdminUsers, getLocalUserCount, isOwnerEmail,
 } from './lib/api';
+import type { AdminUsersData } from './lib/api';
 import { renderGoogleButton } from './lib/google';
 import { subscribeToUpdates } from './lib/realtime';
 import StoryViewer from './components/StoryViewer';
@@ -16,7 +18,7 @@ import DropHub from './components/DropHub';
 import MessagesView from './components/MessagesView';
 import { ReelsView, ClubroomsView, SearchView, NotificationsView, SavedView } from './components/OtherViews';
 
-type View = 'home' | 'discover' | 'hub' | 'search' | 'profile' | 'messages' | 'clubrooms' | 'notifications' | 'saved';
+type View = 'home' | 'discover' | 'hub' | 'search' | 'profile' | 'messages' | 'clubrooms' | 'notifications' | 'saved' | 'admin';
 
 const NAV: { id: View; label: string; icon: string }[] = [
   { id: 'home', label: 'Home', icon: '🏠' },
@@ -46,8 +48,12 @@ export default function App() {
   const [displayName, setDisplayName] = useState('');
   const [password, setPassword] = useState('');
   const [authError, setAuthError] = useState('');
-  const [authStatus, setAuthStatus] = useState({ googleConfigured: false, phoneConfigured: false as const });
+  const [authStatus, setAuthStatus] = useState({ googleConfigured: false, dbConfigured: false, phoneConfigured: false as const });
   const [authLinks, setAuthLinks] = useState({ hasPassword: true, hasGoogle: false });
+  // Admin / Insights (owner only — see the admin view below).
+  const [adminData, setAdminData] = useState<AdminUsersData | null>(null);
+  const [adminLoading, setAdminLoading] = useState(false);
+  const [adminError, setAdminError] = useState('');
   const googleBtnRef = useRef<HTMLDivElement | null>(null);
   const linkGoogleBtnRef = useRef<HTMLDivElement | null>(null);
 
@@ -87,6 +93,22 @@ export default function App() {
     if (!me) return;
     void getAuthLinks().then(setAuthLinks);
   }, [me]);
+
+  // Admin / Insights: load the shared user list only for the owner,
+  // only when the admin view is open. Non-owners never call it.
+  useEffect(() => {
+    if (!me || view !== 'admin' || !isOwnerEmail(me.email)) return;
+    let cancelled = false;
+    setAdminLoading(true);
+    setAdminError('');
+    void getAdminUsers()
+      .then((d) => { if (!cancelled) setAdminData(d); })
+      .catch((err: unknown) => {
+        if (!cancelled) setAdminError(err instanceof Error ? err.message : 'Could not load user insights.');
+      })
+      .finally(() => { if (!cancelled) setAdminLoading(false); });
+    return () => { cancelled = true; };
+  }, [me, view]);
 
   // Real Google sign-in button (Google Identity Services) on the
   // sign-in screen. Rendered only when Google is configured; otherwise
@@ -290,6 +312,43 @@ export default function App() {
       {view === 'clubrooms' && <ClubroomsView me={me} />}
       {view === 'notifications' && <NotificationsView />}
       {view === 'saved' && <SavedView />}
+      {view === 'admin' && (
+        <div style={{ padding: 12 }}>
+          <h2>Admin — user insights</h2>
+          {!isOwnerEmail(me.email) ? (
+            <p className="muted">Admin only.</p>
+          ) : adminLoading ? (
+            <p className="muted">Loading…</p>
+          ) : adminError ? (
+            <p className="muted">{adminError}</p>
+          ) : adminData && !adminData.dbConfigured ? (
+            <>
+              <p className="muted">Shared database not configured — counts are this device only.</p>
+              <p style={{ fontSize: 36, fontWeight: 700, margin: '8px 0' }}>{getLocalUserCount()} <span style={{ fontSize: 16 }}>users on this device (local only)</span></p>
+              <p className="muted">Set DATABASE_URL in Vercel (see README → "Shared user tracking") and redeploy, then every Google sign-in is counted centrally here.</p>
+            </>
+          ) : adminData ? (
+            <>
+              <p style={{ fontSize: 36, fontWeight: 700, margin: '8px 0' }}>{adminData.totalUsers} <span style={{ fontSize: 16 }}>total users</span></p>
+              <h3>Sign-ups by day</h3>
+              {adminData.signupsByDay.length === 0 && <p className="muted">No sign-ups yet.</p>}
+              {adminData.signupsByDay.map((d) => (
+                <p key={d.day}>{d.day}: {d.count}</p>
+              ))}
+              <h3>Users</h3>
+              {adminData.users.length === 0 && <p className="muted">No users yet.</p>}
+              {adminData.users.map((u) => (
+                <div key={u.id} className="card">
+                  <strong>@{u.username}</strong> — {u.displayName}<br />
+                  <span className="muted">{u.email ?? '—'} · {u.authMethod} · {new Date(u.createdAt).toLocaleDateString()}</span>
+                </div>
+              ))}
+              <p className="muted">Users who signed up before the shared database was connected were local-only and do not appear here.</p>
+            </>
+          ) : null}
+          <button className="ghost" onClick={() => setView('profile')}>Back to Profile</button>
+        </div>
+      )}
       {view === 'profile' && (
         <div style={{ padding: 12 }}>
           <h2>{me.displayName} (@{me.username})</h2>
@@ -298,6 +357,9 @@ export default function App() {
           <p>Google: {authLinks.hasGoogle ? `linked${me.email ? ` (${me.email})` : ''}` : authStatus.googleConfigured ? 'not linked' : 'coming soon — credentials needed'}</p>
           {authStatus.googleConfigured && !authLinks.hasGoogle && <div ref={linkGoogleBtnRef} />}
           <button className="ghost" onClick={async () => { await revokeSession(); setMe(null); }}>Sign out / revoke session</button>
+          {isOwnerEmail(me.email) && (
+            <button className="primary" onClick={() => setView('admin')}>Admin — user insights</button>
+          )}
           <h3>Your posts</h3>
           {feed.filter((p) => p.authorId === me.id).map((p) => <div key={p.id} className="card">{p.caption}</div>)}
           <button className="ghost" onClick={() => setView('saved')}>Saved items</button>

@@ -15,11 +15,17 @@ posts, or data — every record is created by a real user in the app.
   comments), DropHub (Waiting/Ready, Blast presets), MessagesView
   (DMs + Slash), OtherViews (Reels, Clubrooms, Search, Notifications, Saved)
 - `src/lib/filters.ts` — all 32 DROP filters + 22 DROP effects, verbatim
-- `src/lib/api.ts` — typed client contract: all 65 actions
+- `src/lib/api.ts` — typed client contract: all 66 actions
 - `src/lib/google.ts` — Google Identity Services loader + button
 - `api/auth/google.ts` — Vercel serverless function: verifies the
-  Google ID token with Google and issues a 30-day session
+  Google ID token with Google and issues a 30-day session; when
+  `DATABASE_URL` is set it upserts the user into Neon Postgres
 - `api/auth/status.ts` — Vercel serverless function: auth status
+  (also reports whether the shared DB is configured)
+- `api/admin/users.ts` — Vercel serverless function: owner-only user
+  count + list + sign-ups by day (see "Shared user tracking")
+- `api/lib/db.ts` — Neon Postgres access (users + sessions tables,
+  session-hash storage, admin check)
 - `server/index.ts` — Node server (Google verification, sessions,
   sealed Drops, Protected rules). Phone + OTP is disabled.
 - `server/schema.ts` + `docs/schema.md` — all 28 database tables
@@ -44,8 +50,10 @@ Server: `npm run server` uses `tsx`. If you prefer, compile it with
 |----------|--------------|-------|
 | `VITE_GOOGLE_CLIENT_ID` | Google sign-in button (browser) | Public client ID, baked in at build time |
 | `DROP_GOOGLE_CLIENT_ID` | Google token verification (server) | Same client ID as above, read at runtime |
+| `DATABASE_URL` | Shared user tracking (Neon Postgres) | Connection string, Secret, Production — see below |
+| `DROP_ADMIN_EMAILS` | Who may see Admin → user insights | Optional, comma-separated; default `durgaprasadt235@gmail.com` |
 
-Set **both to the same client ID** (see "Google sign-in setup" below).
+Set **both Google IDs to the same client ID** (see "Google sign-in setup" below).
 Phone + OTP is disabled — there are no Twilio variables.
 
 Honest note: **Google needs a real client ID to activate.** Without
@@ -80,6 +88,39 @@ Phone sign-in is disabled: there is no phone button, no OTP, and no
 phone-based password reset. If a password user forgets their password,
 they can sign in with Google once they link it in Profile →
 Sign-in & security; password reset itself is currently unavailable.
+
+## Shared user tracking (how many users signed up)
+
+Without a database, every profile lives only in that person's own
+browser (`localStorage`) — there is no central count. With a Neon
+Postgres database connected, every Google sign-in is saved centrally
+and the owner can see the total in the app (Profile → **Admin — user
+insights**), plus sign-ups by day and the user list. Only the owner
+(`durgaprasadt235@gmail.com`, or `DROP_ADMIN_EMAILS`) can see it;
+everyone else gets 403, and unauthenticated callers get 401.
+
+1. **Create a free Neon project:** go to https://neon.tech → sign in
+   with Google → **New Project** (any name, e.g. `drop`) → Create.
+   On the dashboard, copy the **connection string** (it starts with
+   `postgres://` and ends with `?sslmode=require`). Do not share it
+   with anyone — it is a password.
+2. **Vercel** → Project `drop-app` → Settings → Environment Variables
+   → Add: Key `DATABASE_URL`, Value = the connection string, Type
+   **Secret**, Environments **Production** → Save.
+3. **Redeploy** (Deployments → ⋯ → Redeploy).
+4. **Verify:** sign in with Google once on
+   https://drop-app-five.vercel.app/ (or ask a friend to), then in the
+   app go to Profile → **Admin — user insights** — the total should
+   have gone up by one.
+
+Honest limits: users who signed up **before** the database was
+connected were local-only and do **not** appear in the central count
+— they are not backfilled. Password profiles are also local-only and
+are not counted centrally; only Google sign-ins are. Until
+`DATABASE_URL` is set, the Admin view honestly says "Shared database
+not configured — counts are this device only" and shows the local
+count labelled as local-only. Sessions are stored server-side as
+hashes only; Google ID tokens are never stored.
 
 ## Features
 
@@ -141,7 +182,7 @@ git push -u origin main
 
 | Muse hosted app | This repo |
 |-----------------|-----------|
-| Hosted SQLite database | `localStorage` (standalone) / Postgres via `server/schema.ts` |
+| Hosted SQLite database | `localStorage` (standalone) / Neon Postgres via `DATABASE_URL` + `api/lib/db.ts` (shared user tracking) |
 | Platform viewer channel | `src/lib/realtime.ts` (WebSocket + polling fallback) |
 | Server actions (65) | `src/lib/api.ts` + `server/index.ts` + `api/` |
 | Secrets in the Muse server | `.env` on Vercel (never in git) |

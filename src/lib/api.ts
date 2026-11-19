@@ -76,8 +76,17 @@ export interface Message {
   createdAt: string;
 }
 
+/** Owner of DROP — the only account that may see the Admin / Insights view. */
+export const OWNER_EMAIL = 'durgaprasadt235@gmail.com';
+
+export function isOwnerEmail(email: string | null | undefined): boolean {
+  return typeof email === 'string' && email.toLowerCase() === OWNER_EMAIL.toLowerCase();
+}
+
 export interface AuthStatus {
   googleConfigured: boolean;
+  /** True only when DATABASE_URL (Neon) is set server-side — i.e. a shared user count exists. */
+  dbConfigured: boolean;
   /** Phone + OTP is disabled — always false. */
   phoneConfigured: false;
 }
@@ -164,16 +173,18 @@ export async function getAuthStatus(): Promise<AuthStatus> {
   // that hid the Google button after a redeploy with only VITE_ set.
   const viteClientId = (import.meta.env.VITE_GOOGLE_CLIENT_ID as string | undefined) ?? '';
   let serverConfigured = false;
+  let dbConfigured = false;
   try {
     const res = await fetch('/api/auth/status');
     if (res.ok) {
-      const data = (await res.json()) as { googleConfigured?: boolean };
+      const data = (await res.json()) as { googleConfigured?: boolean; dbConfigured?: boolean };
       serverConfigured = Boolean(data.googleConfigured);
+      dbConfigured = Boolean(data.dbConfigured);
     }
   } catch {
     // No serverless function reachable — rely on the build-time ID.
   }
-  return { googleConfigured: serverConfigured || viteClientId.length > 0, phoneConfigured: false };
+  return { googleConfigured: serverConfigured || viteClientId.length > 0, dbConfigured, phoneConfigured: false };
 }
 
 export async function createProfile(args: {
@@ -208,7 +219,10 @@ interface GoogleAuthResponse {
   ok: boolean;
   error?: string;
   user?: { sub: string; email: string; name?: string; picture?: string };
+  /** Present only when DATABASE_URL is set: the shared DB user row. */
+  dbUser?: { id: number; username: string; displayName: string; email: string | null; authMethod: string; createdAt: string };
   session?: { token: string; expiresAt: string };
+  dbConfigured?: boolean;
 }
 
 async function callGoogleAuth(idToken: string): Promise<GoogleAuthResponse> {
@@ -246,9 +260,37 @@ export async function signInWithGoogle(idToken: string): Promise<{ user: User; s
   // Create or link the local profile for this Google account (by sub,
   // then by verified email). No profile is created unless Google
   // verified the token server-side — a fake token never signs anyone in.
+  // When the shared DB is configured, the server returns dbUser: use
+  // the DB id/username as the local cache identity (and keep the local
+  // id sequence ahead of it) so the same person is never counted twice
+  // and the admin session token matches the DB session row.
   let user = store.users.find((u) => u.googleSub === verified.sub)
     ?? store.users.find((u) => u.email === verified.email);
-  if (!user) {
+  if (data.dbUser) {
+    const db = data.dbUser;
+    user = store.users.find((u) => u.id === db.id) ?? user;
+    if (!user) {
+      user = {
+        id: db.id,
+        username: db.username,
+        displayName: db.displayName,
+        avatarUrl: verified.picture ?? null,
+        bio: '',
+        isPrivate: false,
+        googleSub: verified.sub,
+        email: verified.email,
+      };
+      store.users.push(user);
+    } else {
+      user.id = db.id;
+      user.username = db.username;
+      user.displayName = db.displayName;
+      user.googleSub = verified.sub;
+      user.email = verified.email;
+      if (verified.picture && !user.avatarUrl) user.avatarUrl = verified.picture;
+    }
+    if (store.seq < db.id) store.seq = db.id;
+  } else if (!user) {
     user = {
       id: nextId(),
       username: slugFromEmail(verified.email),
@@ -269,6 +311,63 @@ export async function signInWithGoogle(idToken: string): Promise<{ user: User; s
   saveStore(store);
   const session = storeSession(user.id, data.session!.token, data.session!.expiresAt);
   return { user, session };
+}
+
+// ------------------------------------------------------- admin / insights ---
+export interface AdminUserRow {
+  id: number;
+  username: string;
+  displayName: string;
+  email: string | null;
+  authMethod: string;
+  createdAt: string;
+}
+
+export interface AdminUsersData {
+  dbConfigured: boolean;
+  totalUsers: number;
+  users: AdminUserRow[];
+  signupsByDay: { day: string; count: number }[];
+}
+
+function getCurrentSessionToken(): string | null {
+  try {
+    const raw = localStorage.getItem('drop-app-session');
+    if (!raw) return null;
+    return (JSON.parse(raw) as Session).token ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/** Local-only user count (this device) — labelled local-only in the UI. */
+export function getLocalUserCount(): number {
+  return store.users.length;
+}
+
+/**
+ * Owner-only: fetch the shared user list from /api/admin/users.ts.
+ * Sends the current session token as Bearer auth; the server returns
+ * 401 for a missing/invalid session and 403 for a non-admin. When the
+ * shared DB is not configured the server returns dbConfigured: false
+ * with an empty list — never a fake count.
+ */
+export async function getAdminUsers(): Promise<AdminUsersData> {
+  const token = getCurrentSessionToken();
+  if (!token) throw new Error('Sign-in required.');
+  const res = await fetch('/api/admin/users', {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  const data = (await res.json().catch(() => ({}))) as Partial<AdminUsersData> & { ok?: boolean; error?: string };
+  if (!res.ok) {
+    throw new Error(data.error ?? (res.status === 403 ? 'Admin only.' : 'Could not load user insights.'));
+  }
+  return {
+    dbConfigured: Boolean(data.dbConfigured),
+    totalUsers: Number(data.totalUsers ?? 0),
+    users: Array.isArray(data.users) ? data.users : [],
+    signupsByDay: Array.isArray(data.signupsByDay) ? data.signupsByDay : [],
+  };
 }
 
 // Phone + OTP is disabled (2026-11-19). The phone functions were removed
@@ -748,5 +847,5 @@ export const ACTIONS = [
   'createSlashInvitation', 'respondSlashInvitation', 'leaveSlash',
   'listClubrooms', 'createClubroom', 'joinClubroom', 'leaveClubroom',
   'searchAll', 'listNotifications', 'markNotificationsRead',
-  'getUnreadCounts', 'getAppStats', 'subscribe',
+  'getUnreadCounts', 'getAppStats', 'getAdminUsers', 'subscribe',
 ] as const;

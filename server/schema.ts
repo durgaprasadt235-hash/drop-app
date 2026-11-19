@@ -17,7 +17,7 @@ export const TABLES = [
 // NOTE: otp_challenges is UNUSED — phone + OTP is disabled (2026-11-19).
 
 export const DDL = `
-CREATE TABLE users (id SERIAL PRIMARY KEY, username TEXT UNIQUE NOT NULL, display_name TEXT NOT NULL, password_hash TEXT, avatar_url TEXT, bio TEXT, is_private BOOLEAN DEFAULT FALSE, created_at TIMESTAMPTZ DEFAULT NOW());
+CREATE TABLE users (id SERIAL PRIMARY KEY, username TEXT UNIQUE NOT NULL, display_name TEXT NOT NULL, password_hash TEXT, email TEXT UNIQUE, google_sub TEXT UNIQUE, avatar_url TEXT, bio TEXT, is_private BOOLEAN DEFAULT FALSE, auth_method TEXT NOT NULL DEFAULT 'google', created_at TIMESTAMPTZ DEFAULT NOW());
 CREATE TABLE auth_identities (id SERIAL PRIMARY KEY, user_id INT REFERENCES users(id), provider TEXT NOT NULL, provider_user_id TEXT NOT NULL, email TEXT, UNIQUE(provider, provider_user_id));
 CREATE TABLE auth_sessions (id SERIAL PRIMARY KEY, user_id INT REFERENCES users(id), session_hash TEXT UNIQUE NOT NULL, expires_at TIMESTAMPTZ NOT NULL, revoked_at TIMESTAMPTZ, created_at TIMESTAMPTZ DEFAULT NOW());
 CREATE TABLE otp_challenges (id SERIAL PRIMARY KEY, phone TEXT NOT NULL, code_hash TEXT NOT NULL, purpose TEXT NOT NULL, expires_at TIMESTAMPTZ NOT NULL, attempts INT DEFAULT 0, used_at TIMESTAMPTZ, created_at TIMESTAMPTZ DEFAULT NOW());

@@ -8,9 +8,21 @@
 // (Vercel Project Settings → Environment Variables). The client ID is a
 // public identifier, not a secret; no client secret is needed for
 // Google Identity Services token verification.
+// Shared user tracking (2026-11-19): when DATABASE_URL (Neon Postgres)
+// is set, the verified user is upserted into the shared users table
+// (by google_sub, then email) and the session row is stored server-side
+// with only its hash — the response then includes dbUser + dbConfigured
+// so the client can use the shared DB id as its local cache id. When
+// DATABASE_URL is NOT set, the previous localStorage-compatible
+// behaviour is kept and dbConfigured is false — a central count is
+// never faked. If the DB is set but unreachable, sign-in fails with
+// 503 rather than silently signing in locally and undercounting.
 // Phone + OTP is disabled (2026-11-19) — there is no phone endpoint here.
 
 import { randomBytes } from 'node:crypto';
+import {
+  getSql, ensureUserTables, upsertGoogleUser, createDbSession, publicDbUser,
+} from '../lib/db.js';
 
 interface GoogleTokenInfo {
   aud?: string;
@@ -75,12 +87,29 @@ export default async function handler(req: any, res: any): Promise<void> {
     });
     return;
   }
-  // NOTE (standalone): this deployment has no shared database, so the
-  // session token is issued here and the profile is created/linked in
-  // the client store (src/lib/api.ts, keyed by Google sub). In a
-  // production deployment backed by Postgres (server/schema.ts), this
-  // function must instead create/link the user row and store only the
-  // session hash server-side, and the client must validate the session
-  // against the server — never trust a client-stored session alone.
-  res.status(200).json({ ok: true, user: verified, session: issueSessionToken() });
+  const sql = getSql();
+  if (sql) {
+    try {
+      await ensureUserTables(sql);
+      const dbRow = await upsertGoogleUser(sql, verified);
+      const session = await createDbSession(sql, dbRow.id);
+      res.status(200).json({
+        ok: true, user: verified, dbUser: publicDbUser(dbRow),
+        session, dbConfigured: true,
+      });
+      return;
+    } catch (err) {
+      console.error('DROP Google sign-in: shared DB unavailable', err);
+      res.status(503).json({
+        ok: false,
+        error: 'Shared database unavailable — please try again in a moment.',
+      });
+      return;
+    }
+  }
+  // No shared database: the session token is issued here and the
+  // profile is created/linked in the client store (src/lib/api.ts,
+  // keyed by Google sub). The central user count is not available in
+  // this mode (dbConfigured: false) — never fake it.
+  res.status(200).json({ ok: true, user: verified, session: issueSessionToken(), dbConfigured: false });
 }

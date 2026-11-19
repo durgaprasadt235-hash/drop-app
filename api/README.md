@@ -4,7 +4,7 @@ Server implementation: `server/index.ts` (Node built-in `http`, no
 framework) and the Vercel Serverless Functions in `api/` (`auth/google`
 verifies Google ID tokens, `auth/status` reports auth status). Schema:
 `server/schema.ts` and `docs/schema.md` (28 tables).
-Client contract: `src/lib/api.ts` (65 actions).
+Client contract: `src/lib/api.ts` (66 actions).
 
 ## Auth — Google only
 
@@ -31,13 +31,38 @@ Client contract: `src/lib/api.ts` (65 actions).
   `server/schema.ts` is unused. Password reset is currently
   unavailable — a password user who forgets their password can sign in
   with Google once it is linked.
-- Standalone note: this deployment stores data in `localStorage` and
-  the serverless function issues the session token, which the client
-  stores. In a production deployment backed by Postgres
-  (`server/schema.ts`), the function must create/link the user row and
-  store only the session hash server-side, and sessions must be
-  validated against the server — never trust a client-stored session
-  alone.
+- Shared user tracking (2026-11-19): when `DATABASE_URL` (Neon
+  Postgres) is set, `POST /api/auth/google` upserts the verified user
+  into the shared `users` table (by `google_sub`, then email) and
+  stores the session row with only its hash (`auth_sessions.
+  session_hash`) — see `api/lib/db.ts`. The response includes `dbUser`
+  (the shared DB row) and `dbConfigured: true`; the client uses the DB
+  id as its local cache id so nobody is counted twice. When
+  `DATABASE_URL` is not set, the old localStorage behaviour is kept
+  and `dbConfigured: false` is returned — a central count is never
+  faked. If the DB is set but unreachable, the function returns 503
+  rather than silently signing in locally and undercounting.
+  Password profiles are local-only and are not written to the shared
+  DB; only Google sign-ins are counted. Users who signed up before
+  the DB was connected are not backfilled.
+
+## Shared user tracking / Admin insights
+
+- `GET /api/admin/users` returns `{ dbConfigured, totalUsers, users,
+  signupsByDay }`. With no `DATABASE_URL` it returns
+  `dbConfigured: false` with empty lists (no crash, no fake count).
+- With a DB, the caller must send `Authorization: Bearer <token>`
+  (a session issued by `/api/auth/google`, validated against
+  `auth_sessions` by hash, not revoked, not expired). The session's
+  user must be an admin: `DROP_ADMIN_EMAILS` (comma-separated) or,
+  by default, `durgaprasadt235@gmail.com`. Otherwise 401 (no/invalid
+  session) or 403 (not an admin). User emails are returned only to an
+  admin.
+- Client: `getAdminUsers()` in `src/lib/api.ts`; the Admin view in
+  `src/App.tsx` (Profile → "Admin — user insights") is rendered only
+  when the signed-in user's email is the owner email. Without a DB
+  it honestly says "Shared database not configured — counts are this
+  device only" and shows the local-only count.
 
 ## Drops (sealed / Blast)
 
