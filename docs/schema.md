@@ -1,4 +1,4 @@
-# DROP Database Schema — 33 tables
+# DROP Database Schema — 40 tables
 
 Postgres-flavoured DDL lives in `server/schema.ts` (`DDL`). No dummy rows
 are seeded — every row is created by a real user in the app.
@@ -38,8 +38,15 @@ are seeded — every row is created by a real user in the app.
 | 31 | `mutes` | Page 04: muter → muted pairs + scope (muting suppresses feed/notifications, does not delete relationships) |
 | 32 | `room_identities` | Page 04: per-user-per-clubroom identity (mode 'drop' or 'room', alias, avatar) — the account mapping is never exposed to ordinary members |
 | 33 | `privacy_audit_events` | Page 04: security-relevant changes (profile/privacy/block/mute/room actions, no personal data beyond the user id) |
+| 34 | `close_friends` | Settings: owner's Close Friends list (user → friend) |
+| 35 | `story_hidden_from` | Settings: users a story author hides stories from |
+| 36 | `restricted_accounts` | Settings: restrictor → restricted pairs; a restricted user's comments are visible only to the author and the commenter |
+| 37 | `hidden_words` | Settings: per-user hidden words (lowercase, 1–50 chars, max 100 per user) — filter comments, message requests and comment lists |
+| 38 | `user_settings` | Settings: language, accessibility, content prefs, story/comment/sharing prefs, account type, gender, per-event notification prefs |
+| 39 | `story_archive` | Settings: owner's archived stories (media, filter, effect, extras, original date) |
+| 40 | `message_requests` | Settings: DM requests when the recipient only accepts messages from friends (status pending/hidden/accepted/declined; one pending per sender+recipient) |
 
-`users` also gained Page 04 columns: `cover_url`, `links` (JSONB, https only), `location`, `birthday`, `updated_at`.
+`users` also gained Page 04 columns: `cover_url`, `links` (JSONB, https only), `location`, `birthday`, `updated_at`. Settings added `users.last_active_at` (updated by `requireAuth` at most once per 5 minutes; shown as `lastActiveAt` on public profiles only when the target's activity status is on and the viewer isn't restricted by the target).
 
 ## Profile end-to-end (2026-11-19)
 
@@ -57,6 +64,27 @@ references `posts(id)` — an earlier migration wrongly referenced
 `users(id)` and is repaired idempotently by `ensureProfileTables`.
 No Story Highlights feature exists anywhere in the app, so the Profile
 page renders no highlights row (none is faked).
+
+## DROP Settings (2026-11-19)
+
+All Settings routes live behind the single `api/profile/[...route].ts`
+function (no new files): `GET/PATCH /me/settings`, `GET/POST/DELETE
+/me/close-friends`, `/me/hide-story-from`, `/me/restricted`, `GET
+/me/muted`, `GET/POST/DELETE /me/hidden-words`, `GET
+/me/notifications` + `POST /me/notifications/read`, `POST/GET/DELETE
+/me/archive`, `GET /me/apps`, `GET /me/status`, `GET
+/me/message-requests` + `POST /me/message-requests/<id>`, `GET/POST
+/posts/<id>/comments`, `POST /slash-invitations`,
+`POST /slash-invitations/<id>`, `POST /slash-leave`. `notify()` checks
+the recipient's `user_settings` prefs before inserting (missing row =
+all on). `POST /conversations` files a message request (200
+`{status:'requested'}`) when the target only accepts messages from
+friends, and stays 403 for `'nobody'`. `POST /posts` enforces the
+mentioned user's `who_can_mention`. Close-friends / hide-story-from
+are stored server-side but enforced client-side — Stories are
+local-only in this build. `post_comments` and `slash_invitations`
+(which the reference schema already listed) are now also created by
+`ensureProfileTables`, so they exist in Neon too.
 
 ## Key rules (enforced server-side, see `api/README.md`)
 

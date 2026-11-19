@@ -1,6 +1,6 @@
-import { useRef, useState } from 'react';
-import type { Post } from '../lib/api';
-import { toggleLike, addComment, listComments, voteStoryPoll } from '../lib/api';
+import { useEffect, useRef, useState } from 'react';
+import type { Post, ServerComment } from '../lib/api';
+import { toggleLike, addComment, listComments, voteStoryPoll, getMySettings } from '../lib/api';
 import { filterCss } from '../lib/filters';
 
 // Feed post: Fire instead of heart, double-tap Fire, 500ms long-press
@@ -13,10 +13,16 @@ export default function PostCard({ post, onFollow, following }: {
   const [fired, setFired] = useState(false);
   const [count, setCount] = useState(post.fireCount);
   const [showComments, setShowComments] = useState(false);
-  const [comments, setComments] = useState<{ id: number; body: string; author?: { displayName: string } }[]>([]);
+  const [comments, setComments] = useState<ServerComment[]>([]);
   const [commentText, setCommentText] = useState('');
+  const [commentError, setCommentError] = useState('');
   const [showFire, setShowFire] = useState(false);
+  const [hideLikeCounts, setHideLikeCounts] = useState(false);
   const longPress = useRef<number | null>(null);
+
+  useEffect(() => {
+    void getMySettings().then((s) => setHideLikeCounts(s.hideLikeCounts)).catch(() => undefined);
+  }, []);
 
   const fire = async () => {
     const r = await toggleLike(post.id);
@@ -25,7 +31,12 @@ export default function PostCard({ post, onFollow, following }: {
 
   const openComments = async () => {
     setShowComments(true);
-    setComments(await listComments(post.id));
+    setCommentError('');
+    try {
+      setComments(await listComments(post.id));
+    } catch (err) {
+      setCommentError(err instanceof Error ? err.message : 'Could not load comments.');
+    }
   };
 
   const extras = post.extrasJson ? JSON.parse(post.extrasJson) as { poll?: { question: string }; question?: string; stickers?: string[] } : {};
@@ -53,7 +64,7 @@ export default function PostCard({ post, onFollow, following }: {
       </div>
 
       <div className="engagement">
-        <button className={fired ? 'fire-on' : ''} onClick={fire} aria-label="Fire">🔥 {count}</button>
+        <button className={fired ? 'fire-on' : ''} onClick={fire} aria-label="Fire">🔥{hideLikeCounts ? '' : ` ${count}`}</button>
         <button onClick={openComments} aria-label="Comment">💬</button>
         <button aria-label="Reshare">↗️</button>
         <button aria-label="Send">➤</button>
@@ -70,10 +81,21 @@ export default function PostCard({ post, onFollow, following }: {
 
       {showComments && (
         <div style={{ marginTop: 10 }}>
-          {comments.map((c) => <p key={c.id}><strong>{c.author?.displayName}</strong> {c.body}</p>)}
+          {commentError && <div className="notice">{commentError}</div>}
+          {comments.map((c) => <p key={c.id}><strong>{c.author?.displayName ?? c.authorDisplayName ?? 'Someone'}</strong> {c.body}</p>)}
           <div style={{ display: 'flex', gap: 8 }}>
             <input value={commentText} onChange={(e) => setCommentText(e.target.value)} placeholder="Add a comment…" />
-            <button className="primary" onClick={async () => { if (!commentText.trim()) return; await addComment(post.id, commentText); setCommentText(''); setComments(await listComments(post.id)); }}>Post</button>
+            <button className="primary" onClick={async () => {
+              if (!commentText.trim()) return;
+              setCommentError('');
+              try {
+                await addComment(post.id, commentText);
+                setCommentText('');
+                setComments(await listComments(post.id));
+              } catch (err) {
+                setCommentError(err instanceof Error ? err.message : 'Could not post that comment.');
+              }
+            }}>Post</button>
           </div>
         </div>
       )}

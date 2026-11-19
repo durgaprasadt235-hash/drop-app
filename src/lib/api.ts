@@ -82,6 +82,120 @@ export interface PublicProfile {
    *  the viewer may open a DM with this account. */
   canMessage?: boolean;
   createdAt?: string;
+  /** Last activity (ISO) — null when the target hides activity status
+   *  or the viewer is restricted by the target. */
+  lastActiveAt?: string | null;
+  /** The target's interaction prefs (from user_settings). */
+  interaction?: {
+    storyReplies: 'followers' | 'mutual' | 'off';
+    whoCanComment: 'everyone' | 'followers' | 'mutual' | 'off';
+    gifComments: boolean;
+    allowStoryShares: boolean;
+  };
+}
+
+/** DROP user settings — persisted server-side (user_settings). */
+export interface UserSettings {
+  language: string;
+  reduceMotion: boolean;
+  hideLikeCounts: boolean;
+  sensitiveContentLevel: 'less' | 'standard' | 'more';
+  saveStoryToArchive: boolean;
+  storyReplies: 'followers' | 'mutual' | 'off';
+  whoCanComment: 'everyone' | 'followers' | 'mutual' | 'off';
+  gifComments: boolean;
+  allowStoryShares: boolean;
+  accountType: 'personal' | 'creator' | 'business';
+  aiGeneratedLabel: boolean;
+  showAccountSuggestions: boolean;
+  gender: '' | 'male' | 'female' | 'other' | 'prefer-not-to-say';
+  notifyFollow: boolean;
+  notifyFollowRequest: boolean;
+  notifyComment: boolean;
+  notifyMention: boolean;
+  notifyMessage: boolean;
+  notifySlash: boolean;
+  notifyDrop: boolean;
+}
+
+export const DEFAULT_SETTINGS: UserSettings = {
+  language: 'en', reduceMotion: false, hideLikeCounts: false,
+  sensitiveContentLevel: 'standard', saveStoryToArchive: false,
+  storyReplies: 'followers', whoCanComment: 'everyone', gifComments: true,
+  allowStoryShares: true, accountType: 'personal', aiGeneratedLabel: false,
+  showAccountSuggestions: true, gender: '',
+  notifyFollow: true, notifyFollowRequest: true, notifyComment: true,
+  notifyMention: true, notifyMessage: true, notifySlash: true, notifyDrop: true,
+};
+
+export const SETTINGS_LANGUAGES: { code: string; label: string }[] = [
+  { code: 'en', label: 'English' },
+  { code: 'es', label: 'Español' },
+  { code: 'fr', label: 'Français' },
+  { code: 'de', label: 'Deutsch' },
+  { code: 'pt', label: 'Português' },
+  { code: 'hi', label: 'हिन्दी' },
+  { code: 'ar', label: 'العربية' },
+  { code: 'zh', label: '中文' },
+];
+
+/** Apply settings that affect the whole app shell (reduce motion). */
+export function applySettingsToDom(s: UserSettings): void {
+  try {
+    document.body.classList.toggle('reduce-motion', Boolean(s.reduceMotion));
+  } catch { /* not in a browser */ }
+}
+
+export interface ArchivedStory {
+  id: number;
+  userId: number;
+  mediaUrl?: string | null;
+  filter?: string;
+  effect?: string;
+  extrasJson?: string | null;
+  originalCreatedAt?: string;
+  archivedAt: string;
+}
+
+export interface MessageRequestItem {
+  id: number;
+  senderId?: number;
+  senderUsername?: string;
+  senderDisplayName?: string;
+  senderAvatarUrl?: string | null;
+  recipientId?: number;
+  recipientUsername?: string;
+  recipientDisplayName?: string;
+  recipientAvatarUrl?: string | null;
+  body?: string | null;
+  createdAt: string;
+}
+
+export interface ServerComment {
+  id: number;
+  postId: number;
+  authorId: number;
+  authorUsername?: string;
+  authorDisplayName?: string;
+  authorAvatarUrl?: string | null;
+  body: string;
+  createdAt: string;
+  author?: User;
+}
+
+export interface ConnectedApp {
+  provider: string;
+  name: string;
+  email?: string | null;
+  connectedAt?: string | null;
+}
+
+export interface AccountStatus {
+  createdAt?: string | null;
+  isPrivate: boolean;
+  reportsAgainstMe: number;
+  standing: 'good' | 'review';
+  note: string;
 }
 
 export interface Post {
@@ -179,6 +293,14 @@ interface Store {
   blocks: { blockerId: number; blockedId: number }[];
   mutes: { muterId: number; mutedId: number }[];
   roomIdentities: { userId: number; clubroomId: number; mode: 'drop' | 'room'; alias?: string | null; avatarUrl?: string | null }[];
+  settings: Record<number, UserSettings>;
+  closeFriends: { userId: number; friendId: number }[];
+  hiddenFrom: { userId: number; hiddenId: number }[];
+  restricted: { restrictorId: number; restrictedId: number }[];
+  hiddenWords: { userId: number; word: string }[];
+  archivedStories: ArchivedStory[];
+  /** Local record of reports I made (drives 'Less' sensitive-content filtering). */
+  reports: { reporterId: number; targetId: number; createdAt: string }[];
   seq: number;
 }
 
@@ -188,6 +310,8 @@ function emptyStore(): Store {
     messages: [], follows: [], likes: [], saves: [], comments: [],
     notifications: [], clubrooms: [], reels: [],
     privacy: {}, followRequests: [], blocks: [], mutes: [], roomIdentities: [],
+    settings: {}, closeFriends: [], hiddenFrom: [], restricted: [],
+    hiddenWords: [], archivedStories: [], reports: [],
     seq: 1,
   };
 }
@@ -523,8 +647,465 @@ export async function getMyProfileServer(): Promise<PublicProfile | null> {
       bio: p.bio ?? '', links: p.links ?? [], location: p.location ?? null,
       birthday: p.birthday ?? null, isPrivate: Boolean(p.isPrivate),
       relationship: 'self', counts: data.counts, canMessage: p.canMessage ?? true, createdAt: p.createdAt,
+      lastActiveAt: p.lastActiveAt ?? p.last_active_at ?? null,
+      interaction: p.interaction ?? undefined,
     };
   } catch { return null; }
+}
+
+// ------------------------------------------------------- settings --------
+/** Module cache so every screen reads the same settings without a
+ *  round-trip per render; invalidated on update. */
+let settingsCache: { userId: number; settings: UserSettings } | null = null;
+
+function toSettings(server: any): UserSettings {
+  return {
+    language: server.language ?? 'en',
+    reduceMotion: Boolean(server.reduceMotion ?? server.reduce_motion ?? false),
+    hideLikeCounts: Boolean(server.hideLikeCounts ?? server.hide_like_counts ?? false),
+    sensitiveContentLevel: server.sensitiveContentLevel ?? server.sensitive_content_level ?? 'standard',
+    saveStoryToArchive: Boolean(server.saveStoryToArchive ?? server.save_story_to_archive ?? false),
+    storyReplies: server.storyReplies ?? server.story_replies ?? 'followers',
+    whoCanComment: server.whoCanComment ?? server.who_can_comment ?? 'everyone',
+    gifComments: server.gifComments ?? server.gif_comments ?? true,
+    allowStoryShares: server.allowStoryShares ?? server.allow_story_shares ?? true,
+    accountType: server.accountType ?? server.account_type ?? 'personal',
+    aiGeneratedLabel: Boolean(server.aiGeneratedLabel ?? server.ai_generated_label ?? false),
+    showAccountSuggestions: server.showAccountSuggestions ?? server.show_account_suggestions ?? true,
+    gender: server.gender ?? '',
+    notifyFollow: server.notifyFollow ?? server.notify_follow ?? true,
+    notifyFollowRequest: server.notifyFollowRequest ?? server.notify_follow_request ?? true,
+    notifyComment: server.notifyComment ?? server.notify_comment ?? true,
+    notifyMention: server.notifyMention ?? server.notify_mention ?? true,
+    notifyMessage: server.notifyMessage ?? server.notify_message ?? true,
+    notifySlash: server.notifySlash ?? server.notify_slash ?? true,
+    notifyDrop: server.notifyDrop ?? server.notify_drop ?? true,
+  };
+}
+
+function fromSettings(patch: Partial<UserSettings>): Record<string, unknown> {
+  const map: Record<string, string> = {
+    language: 'language', reduceMotion: 'reduceMotion', hideLikeCounts: 'hideLikeCounts',
+    sensitiveContentLevel: 'sensitiveContentLevel', saveStoryToArchive: 'saveStoryToArchive',
+    storyReplies: 'storyReplies', whoCanComment: 'whoCanComment', gifComments: 'gifComments',
+    allowStoryShares: 'allowStoryShares', accountType: 'accountType',
+    aiGeneratedLabel: 'aiGeneratedLabel', showAccountSuggestions: 'showAccountSuggestions',
+    gender: 'gender', notifyFollow: 'notifyFollow', notifyFollowRequest: 'notifyFollowRequest',
+    notifyComment: 'notifyComment', notifyMention: 'notifyMention',
+    notifyMessage: 'notifyMessage', notifySlash: 'notifySlash', notifyDrop: 'notifyDrop',
+  };
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(patch)) {
+    if (v !== undefined && map[k]) out[map[k]] = v;
+  }
+  return out;
+}
+
+export async function getMySettings(): Promise<UserSettings> {
+  const me = requireUser();
+  if (settingsCache?.userId === me.id) return settingsCache.settings;
+  const local = store.settings[me.id];
+  if (dbOn) {
+    try {
+      const data = await serverFetch('/api/profile/me/settings');
+      const next = { ...DEFAULT_SETTINGS, ...toSettings(data.settings ?? {}) };
+      store.settings[me.id] = next;
+      saveStore(store);
+      settingsCache = { userId: me.id, settings: next };
+      applySettingsToDom(next);
+      return next;
+    } catch { /* fall through to local */ }
+  }
+  const next = local ?? { ...DEFAULT_SETTINGS };
+  settingsCache = { userId: me.id, settings: next };
+  applySettingsToDom(next);
+  return next;
+}
+
+/** Synchronous read of the last-loaded settings (defaults if never loaded). */
+export function getCachedSettings(): UserSettings {
+  return settingsCache?.settings ?? { ...DEFAULT_SETTINGS };
+}
+
+export async function updateMySettings(patch: Partial<UserSettings>): Promise<UserSettings> {
+  const me = requireUser();
+  const current = await getMySettings();
+  const merged = { ...current, ...patch };
+  if (dbOn) {
+    const data = await serverFetch('/api/profile/me/settings', {
+      method: 'PATCH',
+      body: JSON.stringify(fromSettings(patch)),
+    });
+    const next = { ...DEFAULT_SETTINGS, ...toSettings(data.settings ?? {}) };
+    store.settings[me.id] = next;
+    saveStore(store);
+    settingsCache = { userId: me.id, settings: next };
+    applySettingsToDom(next);
+    return next;
+  }
+  store.settings[me.id] = merged;
+  saveStore(store);
+  settingsCache = { userId: me.id, settings: merged };
+  applySettingsToDom(merged);
+  return merged;
+}
+
+// ------------------------------------------- settings lists (server) -----
+function mapListUser(u: any): User {
+  return { id: u.id, username: u.username, displayName: u.displayName, avatarUrl: u.avatarUrl ?? null };
+}
+
+async function listServerUsers(path: string, local: () => User[]): Promise<User[]> {
+  if (dbOn) {
+    try {
+      const data = await serverFetch(path);
+      return (data.users ?? []).map(mapListUser);
+    } catch { /* fall through to local */ }
+  }
+  return local();
+}
+
+export async function listCloseFriends(): Promise<User[]> {
+  const me = requireUser();
+  if (dbOn) {
+    try {
+      const data = await serverFetch('/api/profile/me/close-friends');
+      const users = (data.users ?? []).map(mapListUser);
+      // Mirror server-side into the local store so story-visibility
+      // filtering (which reads the author's local lists) works.
+      store.closeFriends = store.closeFriends.filter((x) => x.userId !== me.id);
+      users.forEach((u: User) => store.closeFriends.push({ userId: me.id, friendId: u.id }));
+      saveStore(store);
+      return users;
+    } catch { /* fall through to local */ }
+  }
+  return store.closeFriends.filter((x) => x.userId === me.id)
+    .map((x) => userById(x.friendId)).filter((u): u is User => !!u);
+}
+
+export async function addCloseFriend(id: number): Promise<void> {
+  const me = requireUser();
+  if (id === me.id) throw new Error('You cannot add yourself.');
+  if (dbOn) {
+    await serverFetch('/api/profile/me/close-friends', { method: 'POST', body: JSON.stringify({ userId: id }) });
+  }
+  if (!store.closeFriends.some((x) => x.userId === me.id && x.friendId === id)) {
+    store.closeFriends.push({ userId: me.id, friendId: id });
+  }
+  saveStore(store);
+}
+
+export async function removeCloseFriend(id: number): Promise<void> {
+  const me = requireUser();
+  if (dbOn) {
+    try { await serverFetch(`/api/profile/me/close-friends?userId=${id}`, { method: 'DELETE' }); } catch { /* fall through to local */ }
+  }
+  store.closeFriends = store.closeFriends.filter((x) => !(x.userId === me.id && x.friendId === id));
+  saveStore(store);
+}
+
+export async function listHiddenFrom(): Promise<User[]> {
+  const me = requireUser();
+  if (dbOn) {
+    try {
+      const data = await serverFetch('/api/profile/me/hide-story-from');
+      const users = (data.users ?? []).map(mapListUser);
+      store.hiddenFrom = store.hiddenFrom.filter((x) => x.userId !== me.id);
+      users.forEach((u: User) => store.hiddenFrom.push({ userId: me.id, hiddenId: u.id }));
+      saveStore(store);
+      return users;
+    } catch { /* fall through to local */ }
+  }
+  return store.hiddenFrom.filter((x) => x.userId === me.id)
+    .map((x) => userById(x.hiddenId)).filter((u): u is User => !!u);
+}
+
+export async function addHiddenFrom(id: number): Promise<void> {
+  const me = requireUser();
+  if (id === me.id) throw new Error('You cannot hide your stories from yourself.');
+  if (dbOn) {
+    await serverFetch('/api/profile/me/hide-story-from', { method: 'POST', body: JSON.stringify({ userId: id }) });
+  }
+  if (!store.hiddenFrom.some((x) => x.userId === me.id && x.hiddenId === id)) {
+    store.hiddenFrom.push({ userId: me.id, hiddenId: id });
+  }
+  saveStore(store);
+}
+
+export async function removeHiddenFrom(id: number): Promise<void> {
+  const me = requireUser();
+  if (dbOn) {
+    try { await serverFetch(`/api/profile/me/hide-story-from?userId=${id}`, { method: 'DELETE' }); } catch { /* fall through to local */ }
+  }
+  store.hiddenFrom = store.hiddenFrom.filter((x) => !(x.userId === me.id && x.hiddenId === id));
+  saveStore(store);
+}
+
+export async function listRestricted(): Promise<User[]> {
+  const me = requireUser();
+  return listServerUsers('/api/profile/me/restricted', () =>
+    store.restricted.filter((x) => x.restrictorId === me.id)
+      .map((x) => userById(x.restrictedId)).filter((u): u is User => !!u));
+}
+
+export async function restrictUser(id: number): Promise<void> {
+  const me = requireUser();
+  if (id === me.id) throw new Error('You cannot restrict yourself.');
+  if (dbOn) {
+    await serverFetch('/api/profile/me/restricted', { method: 'POST', body: JSON.stringify({ userId: id }) });
+  }
+  if (!store.restricted.some((x) => x.restrictorId === me.id && x.restrictedId === id)) {
+    store.restricted.push({ restrictorId: me.id, restrictedId: id });
+  }
+  saveStore(store);
+}
+
+export async function unrestrictUser(id: number): Promise<void> {
+  const me = requireUser();
+  if (dbOn) {
+    try { await serverFetch(`/api/profile/me/restricted?userId=${id}`, { method: 'DELETE' }); } catch { /* fall through to local */ }
+  }
+  store.restricted = store.restricted.filter((x) => !(x.restrictorId === me.id && x.restrictedId === id));
+  saveStore(store);
+}
+
+export async function listMutedUsers(): Promise<User[]> {
+  const me = requireUser();
+  return listServerUsers('/api/profile/me/muted', () =>
+    store.mutes.filter((m) => m.muterId === me.id)
+      .map((m) => userById(m.mutedId)).filter((u): u is User => !!u));
+}
+
+export async function listHiddenWords(): Promise<string[]> {
+  const me = requireUser();
+  if (dbOn) {
+    try {
+      const data = await serverFetch('/api/profile/me/hidden-words');
+      const words: string[] = Array.isArray(data.words) ? data.words : [];
+      store.hiddenWords = store.hiddenWords.filter((x) => x.userId !== me.id);
+      words.forEach((w) => store.hiddenWords.push({ userId: me.id, word: w }));
+      saveStore(store);
+      return words;
+    } catch { /* fall through to local */ }
+  }
+  return store.hiddenWords.filter((x) => x.userId === me.id).map((x) => x.word);
+}
+
+export async function addHiddenWord(word: string): Promise<void> {
+  const me = requireUser();
+  const w = word.trim().toLowerCase();
+  if (!w || w.length > 50) throw new Error('A hidden word must be 1–50 characters.');
+  if (!/^[a-z0-9 \-]+$/.test(w)) throw new Error('Hidden words may only contain letters, numbers, spaces and hyphens.');
+  if (dbOn) {
+    await serverFetch('/api/profile/me/hidden-words', { method: 'POST', body: JSON.stringify({ word: w }) });
+  }
+  if (!store.hiddenWords.some((x) => x.userId === me.id && x.word === w)) {
+    store.hiddenWords.push({ userId: me.id, word: w });
+  }
+  saveStore(store);
+}
+
+export async function removeHiddenWord(word: string): Promise<void> {
+  const me = requireUser();
+  if (dbOn) {
+    try { await serverFetch(`/api/profile/me/hidden-words?word=${encodeURIComponent(word)}`, { method: 'DELETE' }); } catch { /* fall through to local */ }
+  }
+  store.hiddenWords = store.hiddenWords.filter((x) => !(x.userId === me.id && x.word === word));
+  saveStore(store);
+}
+
+// --------------------------------------- notifications (server-first) ----
+export interface ServerNotification {
+  id: number;
+  type: string;
+  body: string;
+  read: boolean;
+  createdAt: string;
+}
+
+export async function listServerNotifications(): Promise<ServerNotification[]> {
+  requireUser();
+  if (dbOn) {
+    try {
+      const data = await serverFetch('/api/profile/me/notifications');
+      return (data.notifications ?? []).map((n: any) => ({
+        id: n.id, type: n.type, body: n.body, read: Boolean(n.read), createdAt: n.createdAt,
+      }));
+    } catch { /* fall through to local */ }
+  }
+  return (await listNotifications()).map((n) => ({
+    id: n.id, type: n.type, body: n.body, read: n.read, createdAt: n.createdAt,
+  }));
+}
+
+export async function markNotificationsRead(id?: number): Promise<void> {
+  const me = requireUser();
+  if (dbOn) {
+    try {
+      await serverFetch('/api/profile/me/notifications/read', {
+        method: 'POST',
+        body: JSON.stringify(id !== undefined ? { id } : {}),
+      });
+    } catch { /* fall through to local */ }
+  }
+  if (id !== undefined) {
+    store.notifications.forEach((n) => { if (n.id === id && n.userId === me.id) n.read = true; });
+  } else {
+    store.notifications.forEach((n) => { if (n.userId === me.id) n.read = true; });
+  }
+  saveStore(store);
+}
+
+// ------------------------------------------------------------- archive ---
+export async function listArchive(): Promise<ArchivedStory[]> {
+  const me = requireUser();
+  if (dbOn) {
+    try {
+      const data = await serverFetch('/api/profile/me/archive');
+      return (data.archive ?? data.stories ?? []).map((a: any) => ({
+        id: a.id, userId: a.userId ?? me.id, mediaUrl: a.mediaUrl ?? null,
+        filter: a.filter ?? 'original', effect: a.effect ?? 'none',
+        extrasJson: a.extrasJson ?? a.extras_json ?? null,
+        originalCreatedAt: a.originalCreatedAt ?? a.original_created_at ?? null,
+        archivedAt: a.archivedAt ?? a.archived_at ?? a.createdAt ?? nowIso(),
+      }));
+    } catch { /* fall through to local */ }
+  }
+  return store.archivedStories.filter((a) => a.userId === me.id).slice().reverse();
+}
+
+export async function archiveStory(story: Story): Promise<ArchivedStory> {
+  const me = requireUser();
+  if (dbOn) {
+    try {
+      const data = await serverFetch('/api/profile/me/archive', {
+        method: 'POST',
+        body: JSON.stringify({
+          mediaUrl: story.mediaUrl ?? null, filter: story.filter,
+          effect: story.effect ?? 'none', extrasJson: story.extrasJson ?? null,
+        }),
+      });
+      const a = data.archived ?? data.archive ?? data;
+      const row: ArchivedStory = {
+        id: a.id, userId: me.id, mediaUrl: story.mediaUrl ?? null,
+        filter: story.filter, effect: story.effect ?? 'none',
+        extrasJson: story.extrasJson ?? null,
+        originalCreatedAt: story.createdAt, archivedAt: a.archivedAt ?? a.archived_at ?? nowIso(),
+      };
+      if (!store.archivedStories.some((x) => x.id === row.id)) store.archivedStories.push(row);
+      saveStore(store);
+      return row;
+    } catch { /* fall through to local-only archive */ }
+  }
+  const row: ArchivedStory = {
+    id: nextId(), userId: me.id, mediaUrl: story.mediaUrl ?? null,
+    filter: story.filter, effect: story.effect ?? 'none',
+    extrasJson: story.extrasJson ?? null,
+    originalCreatedAt: story.createdAt, archivedAt: nowIso(),
+  };
+  store.archivedStories.push(row);
+  saveStore(store);
+  return row;
+}
+
+export async function deleteArchived(id: number): Promise<void> {
+  const me = requireUser();
+  if (dbOn) {
+    try { await serverFetch(`/api/profile/me/archive?id=${id}`, { method: 'DELETE' }); } catch { /* fall through to local */ }
+  }
+  store.archivedStories = store.archivedStories.filter((a) => !(a.id === id && a.userId === me.id));
+  saveStore(store);
+}
+
+// ------------------------------------------------------- apps & status ---
+export async function listConnectedApps(): Promise<ConnectedApp[]> {
+  const me = requireUser();
+  if (dbOn) {
+    try {
+      const data = await serverFetch('/api/profile/me/apps');
+      return (data.apps ?? []).map((a: any) => ({
+        provider: a.provider, name: a.name, email: a.email ?? null, connectedAt: a.connectedAt ?? null,
+      }));
+    } catch { /* fall through to local */ }
+  }
+  // Local-only: the only sign-in method this build has is Google, when linked.
+  return me.googleSub
+    ? [{ provider: 'google', name: 'Google sign-in', email: me.email ?? null, connectedAt: null }]
+    : [];
+}
+
+export async function getAccountStatus(): Promise<AccountStatus> {
+  const me = requireUser();
+  if (dbOn) {
+    const data = await serverFetch('/api/profile/me/status');
+    const s = data.status ?? {};
+    return {
+      createdAt: s.createdAt ?? s.created_at ?? null,
+      isPrivate: Boolean(s.isPrivate ?? s.is_private ?? false),
+      reportsAgainstMe: Number(s.reportsAgainstMe ?? s.reports_against_me ?? 0),
+      standing: s.standing === 'review' ? 'review' : 'good',
+      note: s.note ?? 'No actions have been taken on your account.',
+    };
+  }
+  const reports = store.notifications.filter((n) => n.userId === me.id && n.type === 'report').length;
+  return {
+    createdAt: me.createdAt ?? null,
+    isPrivate: Boolean(me.isPrivate),
+    reportsAgainstMe: reports,
+    standing: reports > 0 ? 'review' : 'good',
+    note: reports > 0
+      ? 'Your account has been reported. No actions have been taken yet.'
+      : 'No actions have been taken on your account.',
+  };
+}
+
+// ---------------------------------------------------- message requests ---
+export async function listMessageRequests(): Promise<{
+  incoming: MessageRequestItem[]; outgoing: MessageRequestItem[]; hidden: MessageRequestItem[];
+}> {
+  requireUser();
+  if (dbOn) {
+    try {
+      const data = await serverFetch('/api/profile/me/message-requests');
+      const mapReq = (r: any): MessageRequestItem => ({
+        id: r.id,
+        senderId: r.senderId ?? r.sender_id, senderUsername: r.senderUsername ?? r.sender_username,
+        senderDisplayName: r.senderDisplayName ?? r.sender_display_name,
+        senderAvatarUrl: r.senderAvatarUrl ?? r.sender_avatar_url ?? null,
+        recipientId: r.recipientId ?? r.recipient_id,
+        recipientUsername: r.recipientUsername ?? r.recipient_username,
+        recipientDisplayName: r.recipientDisplayName ?? r.recipient_display_name,
+        recipientAvatarUrl: r.recipientAvatarUrl ?? r.recipient_avatar_url ?? null,
+        body: r.body ?? null, createdAt: r.createdAt ?? r.created_at,
+      });
+      return {
+        incoming: (data.incoming ?? []).map(mapReq),
+        outgoing: (data.outgoing ?? []).map(mapReq),
+        hidden: (data.hidden ?? []).map(mapReq),
+      };
+    } catch { /* fall through to local: no server requests exist yet */ }
+  }
+  return { incoming: [], outgoing: [], hidden: [] };
+}
+
+export async function answerMessageRequest(id: number, accept: boolean): Promise<{ status: string; conversationId?: number }> {
+  const me = requireUser();
+  if (dbOn) {
+    const data = await serverFetch(`/api/profile/me/message-requests/${id}`, {
+      method: 'POST',
+      body: JSON.stringify({ accept }),
+    });
+    if (accept && data.conversationId) {
+      const cid = Number(data.conversationId);
+      if (!store.conversations.some((c) => c.id === cid)) {
+        store.conversations.push({ id: cid, memberIds: [me.id] });
+      }
+      saveStore(store);
+      return { status: 'accepted', conversationId: cid };
+    }
+    return { status: accept ? 'accepted' : 'declined' };
+  }
+  throw new Error('Message requests need the shared database — sign in with Google on a device where it is configured.');
 }
 
 export async function getPublicProfile(username: string): Promise<PublicProfile> {
@@ -539,6 +1120,8 @@ export async function getPublicProfile(username: string): Promise<PublicProfile>
         birthday: p.birthday ?? null, isPrivate: Boolean(p.isPrivate),
         relationship: p.relationship ?? 'none', counts: p.counts,
         canMessage: p.canMessage ?? false, createdAt: p.createdAt,
+        lastActiveAt: p.lastActiveAt ?? p.last_active_at ?? null,
+        interaction: p.interaction ?? undefined,
       };
     } catch (err) { throw err; }
   }
@@ -947,12 +1530,27 @@ export async function reportUser(userId: number, reason: string): Promise<void> 
       method: 'POST',
       body: JSON.stringify({ targetId: userId, reason }),
     });
+    // Local record too — drives 'Less' sensitive-content filtering.
+    if (!store.reports.some((r) => r.reporterId === me.id && r.targetId === userId)) {
+      store.reports.push({ reporterId: me.id, targetId: userId, createdAt: nowIso() });
+      saveStore(store);
+    }
     return;
+  }
+  if (!store.reports.some((r) => r.reporterId === me.id && r.targetId === userId)) {
+    store.reports.push({ reporterId: me.id, targetId: userId, createdAt: nowIso() });
   }
   store.notifications.push({
     id: nextId(), userId, type: 'report', body: `Reported by ${me.username}: ${reason}`, read: false, createdAt: nowIso(),
   });
   saveStore(store);
+}
+
+/** Local record of who I have reported (used by 'Less' feed filtering). */
+export function getReportedAuthorIds(): number[] {
+  const me = currentUserId;
+  if (me === null) return [];
+  return store.reports.filter((r) => r.reporterId === me).map((r) => r.targetId);
 }
 
 /**
@@ -961,8 +1559,13 @@ export async function reportUser(userId: number, reason: string): Promise<void> 
  * stored who_can_message and blocking before any conversation exists.
  * Until this existed, no code path in the app created a conversation
  * at all — the profile Message button led to an empty inbox.
+ *
+ * Returns the conversation id — or `{status:'requested', requestId}`
+ * when the target only accepts messages from friends and a message
+ * request was created instead (200, not an error). Callers must handle
+ * the requested case (show "Request sent", do not open a conversation).
  */
-export async function createConversation(targetId: number): Promise<number> {
+export async function createConversation(targetId: number): Promise<number | { status: 'requested'; requestId: number }> {
   const me = requireUser();
   if (targetId === me.id) throw new Error('You cannot message yourself.');
   if (dbOn) {
@@ -970,6 +1573,9 @@ export async function createConversation(targetId: number): Promise<number> {
       method: 'POST',
       body: JSON.stringify({ targetId }),
     });
+    if (data.status === 'requested') {
+      return { status: 'requested', requestId: Number(data.requestId) };
+    }
     const id = Number(data.conversationId);
     if (!Number.isInteger(id) || id <= 0) throw new Error('Could not open this conversation.');
     if (store.seq < id) store.seq = id;
@@ -995,8 +1601,20 @@ export async function listFeed(): Promise<Post[]> {
   // not delete follows or messages — it only hides their content).
   const me = currentUserId;
   const muted = new Set(store.mutes.filter((m) => m.muterId === me).map((m) => m.mutedId));
+  // Sensitive content 'Less' hides posts from accounts I have reported.
+  // DROP does not classify content yet — this is the honest enforcement
+  // the setting promises (see the Content preferences screen).
+  let reported = new Set<number>();
+  if (me !== null) {
+    try {
+      const s = await getMySettings();
+      if (s.sensitiveContentLevel === 'less') {
+        reported = new Set(getReportedAuthorIds());
+      }
+    } catch { /* settings unavailable — show everything */ }
+  }
   return [...store.posts].reverse()
-    .filter((p) => !muted.has(p.authorId))
+    .filter((p) => !muted.has(p.authorId) && !reported.has(p.authorId))
     .map((p) => ({ ...p, author: userById(p.authorId) }));
 }
 
@@ -1105,19 +1723,69 @@ export async function toggleSave(postId: number): Promise<{ saved: boolean }> {
   return { saved: idx < 0 };
 }
 
-export async function listComments(postId: number) {
-  return store.comments.filter((c) => c.postId === postId).map((c) => ({ ...c, author: userById(c.authorId) }));
+export async function listComments(postId: number): Promise<ServerComment[]> {
+  return listPostComments(postId);
 }
 
-export async function addComment(postId: number, body: string) {
+/** Server-first comments; falls back to the local store when the shared
+ *  DB is off or unreachable. Server enforces the author's
+ *  who_can_comment, hidden words and restricted-comment visibility. */
+export async function listPostComments(postId: number): Promise<ServerComment[]> {
+  if (dbOn) {
+    try {
+      const data = await serverFetch(`/api/profile/posts/${postId}/comments`);
+      return (data.comments ?? []).map((c: any) => ({
+        id: c.id, postId: c.postId ?? postId, authorId: c.authorId,
+        authorUsername: c.authorUsername, authorDisplayName: c.authorDisplayName,
+        authorAvatarUrl: c.authorAvatarUrl ?? null, body: c.body, createdAt: c.createdAt,
+        author: userById(c.authorId),
+      }));
+    } catch { /* fall through to local */ }
+  }
+  return store.comments.filter((c) => c.postId === postId).map((c) => ({
+    ...c,
+    authorUsername: userById(c.authorId)?.username,
+    authorDisplayName: userById(c.authorId)?.displayName,
+    authorAvatarUrl: userById(c.authorId)?.avatarUrl ?? null,
+    author: userById(c.authorId),
+  }));
+}
+
+export async function addComment(postId: number, body: string): Promise<ServerComment> {
+  return addPostComment(postId, body);
+}
+
+export async function addPostComment(postId: number, body: string): Promise<ServerComment> {
   const me = requireUser();
   if (!body.trim()) throw new Error('Comment cannot be empty.');
-  const comment = { id: nextId(), postId, authorId: me.id, body, createdAt: nowIso() };
+  if (body.trim().length > 500) throw new Error('Comments must be 500 characters or fewer.');
+  if (dbOn) {
+    const data = await serverFetch(`/api/profile/posts/${postId}/comments`, {
+      method: 'POST',
+      body: JSON.stringify({ body: body.trim() }),
+    });
+    const c = data.comment;
+    const comment: ServerComment = {
+      id: c.id, postId: c.postId ?? postId, authorId: c.authorId ?? me.id,
+      authorUsername: c.authorUsername ?? me.username,
+      authorDisplayName: c.authorDisplayName ?? me.displayName,
+      authorAvatarUrl: c.authorAvatarUrl ?? me.avatarUrl ?? null,
+      body: c.body, createdAt: c.createdAt, author: me,
+    };
+    if (!store.comments.some((x) => x.id === comment.id)) {
+      store.comments.push({ id: comment.id, postId, authorId: comment.authorId, body: comment.body, createdAt: comment.createdAt });
+    }
+    const post = store.posts.find((p) => p.id === postId);
+    if (post) post.commentCount += 1;
+    saveStore(store);
+    return comment;
+  }
+  const comment = { id: nextId(), postId, authorId: me.id, body: body.trim(), createdAt: nowIso() };
   store.comments.push(comment);
   const post = store.posts.find((p) => p.id === postId);
   if (post) post.commentCount += 1;
   saveStore(store);
-  return { ...comment, author: me };
+  return { ...comment, authorUsername: me.username, authorDisplayName: me.displayName, authorAvatarUrl: me.avatarUrl ?? null, author: me };
 }
 
 export async function deleteComment(commentId: number): Promise<void> {
@@ -1204,26 +1872,71 @@ export async function getPost(postId: number): Promise<Post | null> {
 }
 
 // ------------------------------------------------------------ stories ----
+/** Client-enforced story visibility (stories are local-only in this
+ *  build). The author's lists are read from the local store — the
+ *  lists this device knows. When the shared DB is on, my own lists
+ *  are mirrored locally on every list fetch (see listCloseFriends /
+ *  listHiddenFrom), so filtering works for stories I authored; another
+ *  author's lists live on their device/server and are not visible
+ *  here, so their stories cannot be filtered on this device. That is
+ *  an honest limit of local-only stories, not a silent pass. */
+export function storyAudience(story: Story): 'everyone' | 'close-friends' {
+  try {
+    const extras = story.extrasJson ? JSON.parse(story.extrasJson) as { audience?: string } : {};
+    return extras.audience === 'close-friends' ? 'close-friends' : 'everyone';
+  } catch {
+    return 'everyone';
+  }
+}
+
+/** Is this story visible to `viewerId` under the author's lists? */
+export function isStoryVisibleTo(story: Story, viewerId: number): boolean {
+  if (story.authorId === viewerId) return true; // the author always sees their own stories
+  if (store.hiddenFrom.some((x) => x.userId === story.authorId && x.hiddenId === viewerId)) return false;
+  if (storyAudience(story) === 'close-friends'
+    && !store.closeFriends.some((x) => x.userId === story.authorId && x.friendId === viewerId)) return false;
+  return true;
+}
+
 export async function listStories(): Promise<Story[]> {
   const now = Date.now();
-  return store.stories
+  const me = currentUserId;
+  const all = store.stories
     .filter((s) => new Date(s.expiresAt).getTime() > now)
     .map((s) => ({ ...s, author: userById(s.authorId) }));
+  if (me === null) return all;
+  return all.filter((s) => isStoryVisibleTo(s, me));
 }
 
 export async function createStory(args: {
   mediaUrl?: string | null; filter?: string; effect?: string; extrasJson?: string | null;
+  audience?: 'everyone' | 'close-friends';
 }): Promise<Story> {
   const me = requireUser();
+  let extrasJson = args.extrasJson ?? null;
+  if (args.audience) {
+    try {
+      const extras = extrasJson ? JSON.parse(extrasJson) as Record<string, unknown> : {};
+      extras.audience = args.audience;
+      extrasJson = JSON.stringify(extras);
+    } catch {
+      extrasJson = JSON.stringify({ audience: args.audience });
+    }
+  }
   const story: Story = {
     id: nextId(), authorId: me.id, mediaUrl: args.mediaUrl ?? null,
     filter: args.filter ?? 'original', effect: args.effect ?? 'none',
-    extrasJson: args.extrasJson ?? null,
+    extrasJson,
     expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
     createdAt: nowIso(),
   };
   store.stories.push(story);
   saveStore(store);
+  // Archive automatically when the setting is on.
+  try {
+    const s = await getMySettings();
+    if (s.saveStoryToArchive) await archiveStory(story);
+  } catch { /* archive failure must not lose the story */ }
   return { ...story, author: me };
 }
 
@@ -1409,21 +2122,50 @@ export async function sendPostToConversation(conversationId: number, postId: num
   return sendMessage(conversationId, `Shared a post: ${post.caption}`);
 }
 
-export async function createSlashInvitation(conversationId: number, userId: number): Promise<void> {
+/** Slash: /username invites that person into this chat instantly.
+ *  Server-first (POST /api/profile/slash-invitations) — the server
+ *  enforces the invitee's who_can_slash and notifies them. When the
+ *  shared DB is off, falls back to the local notification so the
+ *  invite still shows on this device. Returns the server invitation
+ *  id when one exists. */
+export async function createSlashInvitation(conversationId: number, userId: number): Promise<{ invitationId?: number }> {
   const me = requireUser();
+  if (dbOn) {
+    const data = await serverFetch('/api/profile/slash-invitations', {
+      method: 'POST',
+      body: JSON.stringify({ conversationId, inviteeId: userId }),
+    });
+    return { invitationId: Number(data.invitationId) || undefined };
+  }
   store.notifications.push({
     id: nextId(), userId, type: 'slash', body: `${me.username} invited you via Slash`, read: false, createdAt: nowIso(),
   });
   saveStore(store);
-  void conversationId;
+  return {};
 }
 
-export async function respondSlashInvitation(_invitationId: number, _accept: boolean): Promise<void> {
+export async function respondSlashInvitation(invitationId: number, accept: boolean): Promise<void> {
   // Slash invitations vanish when the invited user leaves — no group left behind.
+  if (dbOn) {
+    await serverFetch(`/api/profile/slash-invitations/${invitationId}`, {
+      method: 'POST',
+      body: JSON.stringify({ accept }),
+    });
+    return;
+  }
+  // Local-only: nothing to persist — the invitation was a notification.
 }
 
-export async function leaveSlash(_conversationId: number): Promise<void> {
+export async function leaveSlash(conversationId: number): Promise<void> {
   // Leaving a Slash expansion removes it for that participant only.
+  if (dbOn) {
+    await serverFetch('/api/profile/slash-leave', {
+      method: 'POST',
+      body: JSON.stringify({ conversationId }),
+    });
+    return;
+  }
+  // Local-only: nothing server-side to leave.
 }
 
 // ----------------------------------------------------------- clubrooms ---
@@ -1469,12 +2211,6 @@ export async function listNotifications() {
   return store.notifications.filter((n) => n.userId === me.id).reverse();
 }
 
-export async function markNotificationsRead(): Promise<void> {
-  const me = requireUser();
-  store.notifications.forEach((n) => { if (n.userId === me.id) n.read = true; });
-  saveStore(store);
-}
-
 export async function getUnreadCounts(): Promise<{ messages: number; notifications: number }> {
   const me = requireUser();
   return {
@@ -1504,6 +2240,17 @@ export const ACTIONS = [
   'getSessionUser', 'revokeSession', 'getAuthLinks', 'linkGoogle',
   'updateProfile', 'getProfile', 'getPublicProfile', 'getMyProfileServer',
   'getMyPrivacy', 'updateMyPrivacy', 'uploadProfilePhoto',
+  'getMySettings', 'updateMySettings', 'getCachedSettings', 'applySettingsToDom',
+  'listCloseFriends', 'addCloseFriend', 'removeCloseFriend',
+  'listHiddenFrom', 'addHiddenFrom', 'removeHiddenFrom',
+  'listRestricted', 'restrictUser', 'unrestrictUser',
+  'listMutedUsers', 'listHiddenWords', 'addHiddenWord', 'removeHiddenWord',
+  'listServerNotifications', 'markNotificationsRead',
+  'listArchive', 'archiveStory', 'deleteArchived',
+  'listConnectedApps', 'getAccountStatus',
+  'listMessageRequests', 'answerMessageRequest',
+  'listPostComments', 'addPostComment', 'getReportedAuthorIds',
+  'storyAudience', 'isStoryVisibleTo',
   'listFollowRequests', 'listBlockedMuted', 'listFollowersFollowing',
   'getRoomIdentity', 'joinClubroomWithIdentity', 'updateRoomIdentity',
   'listUsers', 'followUser', 'unfollowUser',

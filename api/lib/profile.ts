@@ -28,6 +28,7 @@ export interface FullDbUser extends DbUserRow {
   links: { label: string; url: string }[] | null;
   location: string | null;
   birthday: string | null;
+  last_active_at?: string | null;
   created_at: string;
 }
 
@@ -66,6 +67,7 @@ export async function ensureProfileTables(sql: Sql): Promise<void> {
   await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS location TEXT`;
   await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS birthday DATE`;
   await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW()`;
+  await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS last_active_at TIMESTAMPTZ`;
   // Tables the reference schema defines but ensureUserTables never
   // created in Neon (only users + auth_sessions existed there).
   await sql`CREATE TABLE IF NOT EXISTS follows (follower_id INT REFERENCES users(id), following_id INT REFERENCES users(id), PRIMARY KEY (follower_id, following_id))`;
@@ -94,7 +96,62 @@ export async function ensureProfileTables(sql: Sql): Promise<void> {
   await sql`CREATE TABLE IF NOT EXISTS conversations (id SERIAL PRIMARY KEY, created_at TIMESTAMPTZ DEFAULT NOW())`;
   await sql`CREATE TABLE IF NOT EXISTS conversation_members (conversation_id INT REFERENCES conversations(id), user_id INT REFERENCES users(id), joined_at TIMESTAMPTZ DEFAULT NOW(), PRIMARY KEY (conversation_id, user_id))`;
   await sql`CREATE TABLE IF NOT EXISTS messages (id SERIAL PRIMARY KEY, conversation_id INT REFERENCES conversations(id), sender_id INT REFERENCES users(id), body TEXT NOT NULL, created_at TIMESTAMPTZ DEFAULT NOW())`;
+  await sql`CREATE TABLE IF NOT EXISTS post_comments (id SERIAL PRIMARY KEY, post_id INT REFERENCES posts(id), author_id INT REFERENCES users(id), body TEXT NOT NULL, created_at TIMESTAMPTZ DEFAULT NOW())`;
+  await sql`CREATE TABLE IF NOT EXISTS slash_invitations (id SERIAL PRIMARY KEY, conversation_id INT REFERENCES conversations(id), inviter_id INT REFERENCES users(id), invitee_id INT REFERENCES users(id), status TEXT DEFAULT 'pending', created_at TIMESTAMPTZ DEFAULT NOW())`;
   await sql`CREATE TABLE IF NOT EXISTS notifications (id SERIAL PRIMARY KEY, user_id INT REFERENCES users(id), type TEXT NOT NULL, body TEXT NOT NULL, read BOOLEAN DEFAULT FALSE, created_at TIMESTAMPTZ DEFAULT NOW())`;
+  // Settings tables (2026-11-19): total goes 33 → 40 tables.
+  await sql`CREATE TABLE IF NOT EXISTS close_friends (user_id INT NOT NULL REFERENCES users(id), friend_id INT NOT NULL REFERENCES users(id), created_at TIMESTAMPTZ DEFAULT NOW(), PRIMARY KEY (user_id, friend_id))`;
+  await sql`CREATE TABLE IF NOT EXISTS story_hidden_from (user_id INT NOT NULL REFERENCES users(id), hidden_id INT NOT NULL REFERENCES users(id), created_at TIMESTAMPTZ DEFAULT NOW(), PRIMARY KEY (user_id, hidden_id))`;
+  await sql`CREATE TABLE IF NOT EXISTS restricted_accounts (restrictor_id INT NOT NULL REFERENCES users(id), restricted_id INT NOT NULL REFERENCES users(id), created_at TIMESTAMPTZ DEFAULT NOW(), PRIMARY KEY (restrictor_id, restricted_id))`;
+  await sql`CREATE TABLE IF NOT EXISTS hidden_words (user_id INT NOT NULL REFERENCES users(id), word TEXT NOT NULL, created_at TIMESTAMPTZ DEFAULT NOW(), PRIMARY KEY (user_id, word))`;
+  await sql`
+    CREATE TABLE IF NOT EXISTS user_settings (
+      user_id INT PRIMARY KEY REFERENCES users(id),
+      language TEXT NOT NULL DEFAULT 'en',
+      reduce_motion BOOLEAN NOT NULL DEFAULT FALSE,
+      hide_like_counts BOOLEAN NOT NULL DEFAULT FALSE,
+      sensitive_content_level TEXT NOT NULL DEFAULT 'standard',
+      save_story_to_archive BOOLEAN NOT NULL DEFAULT FALSE,
+      story_replies TEXT NOT NULL DEFAULT 'followers',
+      who_can_comment TEXT NOT NULL DEFAULT 'everyone',
+      gif_comments BOOLEAN NOT NULL DEFAULT TRUE,
+      allow_story_shares BOOLEAN NOT NULL DEFAULT TRUE,
+      account_type TEXT NOT NULL DEFAULT 'personal',
+      ai_generated_label BOOLEAN NOT NULL DEFAULT FALSE,
+      show_account_suggestions BOOLEAN NOT NULL DEFAULT TRUE,
+      gender TEXT,
+      notify_follow BOOLEAN NOT NULL DEFAULT TRUE,
+      notify_follow_request BOOLEAN NOT NULL DEFAULT TRUE,
+      notify_comment BOOLEAN NOT NULL DEFAULT TRUE,
+      notify_mention BOOLEAN NOT NULL DEFAULT TRUE,
+      notify_message BOOLEAN NOT NULL DEFAULT TRUE,
+      notify_slash BOOLEAN NOT NULL DEFAULT TRUE,
+      notify_drop BOOLEAN NOT NULL DEFAULT TRUE,
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    )`;
+  await sql`
+    CREATE TABLE IF NOT EXISTS story_archive (
+      id SERIAL PRIMARY KEY,
+      user_id INT NOT NULL REFERENCES users(id),
+      media_url TEXT,
+      filter TEXT DEFAULT 'original',
+      effect TEXT DEFAULT 'none',
+      extras_json JSONB,
+      original_created_at TIMESTAMPTZ,
+      archived_at TIMESTAMPTZ DEFAULT NOW()
+    )`;
+  await sql`
+    CREATE TABLE IF NOT EXISTS message_requests (
+      id SERIAL PRIMARY KEY,
+      sender_id INT NOT NULL REFERENCES users(id),
+      recipient_id INT NOT NULL REFERENCES users(id),
+      body TEXT,
+      status TEXT NOT NULL DEFAULT 'pending',
+      conversation_id INT REFERENCES conversations(id),
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    )`;
+  await sql`CREATE UNIQUE INDEX IF NOT EXISTS message_requests_pending_unique ON message_requests (sender_id, recipient_id) WHERE status = 'pending'`;
   // New tables for this module.
   await sql`
     CREATE TABLE IF NOT EXISTS privacy_preferences (
@@ -168,7 +225,9 @@ export class HttpError extends Error {
   constructor(status: number, message: string) { super(message); this.status = status; }
 }
 
-/** Returns the authenticated DB user, or throws 401/503. */
+/** Returns the authenticated DB user, or throws 401/503. Also records
+ *  presence (last_active_at) at most once per 5 minutes, best-effort —
+ *  it never fails the request. */
 export async function requireAuth(req: any): Promise<{ sql: Sql; me: FullDbUser }> {
   const sql = getSql();
   if (!sql) throw new HttpError(503, 'Shared database not configured — set DATABASE_URL (Neon) in Vercel and redeploy.');
@@ -177,6 +236,9 @@ export async function requireAuth(req: any): Promise<{ sql: Sql; me: FullDbUser 
   await ensureProfileTables(sql);
   const row = await validateDbSession(sql, token);
   if (!row) throw new HttpError(401, 'Invalid or expired session.');
+  try {
+    await sql`UPDATE users SET last_active_at = NOW() WHERE id = ${row.id} AND (last_active_at IS NULL OR last_active_at < NOW() - INTERVAL '5 minutes')`;
+  } catch { /* presence must never break the request */ }
   return { sql, me: row as FullDbUser };
 }
 
@@ -197,7 +259,7 @@ const RESERVED = new Set([
   // Route names under /api/profile/* — a user named e.g. "posts" would
   // collide with the POST /api/profile/posts content endpoint.
   'me', 'profile', 'posts', 'reels', 'drops', 'saved', 'save', 'report',
-  'conversations', 'messages',
+  'conversations', 'messages', 'slash-invitations', 'slash-leave',
 ]);
 
 export function validateUsername(username: string): string | null {
@@ -274,6 +336,208 @@ export async function savePrivacy(sql: Sql, userId: number, p: PrivacyPrefs): Pr
   await sql`UPDATE users SET is_private = ${p.is_private}, updated_at = NOW() WHERE id = ${userId}`;
 }
 
+// ------------------------------------------------------------- settings ---
+// DROP Settings (2026-11-19). Stored snake_case in user_settings,
+// exposed camelCase to the client. A missing row means all defaults.
+
+export interface UserSettings {
+  language: string;
+  reduceMotion: boolean;
+  hideLikeCounts: boolean;
+  sensitiveContentLevel: 'less' | 'standard' | 'more';
+  saveStoryToArchive: boolean;
+  storyReplies: 'followers' | 'mutual' | 'off';
+  whoCanComment: 'everyone' | 'followers' | 'mutual' | 'off';
+  gifComments: boolean;
+  allowStoryShares: boolean;
+  accountType: 'personal' | 'creator' | 'business';
+  aiGeneratedLabel: boolean;
+  showAccountSuggestions: boolean;
+  gender: string | null;
+  notifyFollow: boolean;
+  notifyFollowRequest: boolean;
+  notifyComment: boolean;
+  notifyMention: boolean;
+  notifyMessage: boolean;
+  notifySlash: boolean;
+  notifyDrop: boolean;
+}
+
+export const DEFAULT_SETTINGS: UserSettings = {
+  language: 'en',
+  reduceMotion: false,
+  hideLikeCounts: false,
+  sensitiveContentLevel: 'standard',
+  saveStoryToArchive: false,
+  storyReplies: 'followers',
+  whoCanComment: 'everyone',
+  gifComments: true,
+  allowStoryShares: true,
+  accountType: 'personal',
+  aiGeneratedLabel: false,
+  showAccountSuggestions: true,
+  gender: null,
+  notifyFollow: true,
+  notifyFollowRequest: true,
+  notifyComment: true,
+  notifyMention: true,
+  notifyMessage: true,
+  notifySlash: true,
+  notifyDrop: true,
+};
+
+const LANGUAGES = ['en', 'es', 'fr', 'de', 'pt', 'hi', 'ar', 'zh'] as const;
+const SENSITIVE_LEVELS = ['less', 'standard', 'more'] as const;
+const STORY_REPLIES = ['followers', 'mutual', 'off'] as const;
+const WHO_CAN_COMMENT = ['everyone', 'followers', 'mutual', 'off'] as const;
+const ACCOUNT_TYPES = ['personal', 'creator', 'business'] as const;
+const GENDERS = ['male', 'female', 'other', 'prefer-not-to-say'] as const;
+
+export async function getSettings(sql: Sql, userId: number): Promise<UserSettings> {
+  const rows = (await sql`SELECT * FROM user_settings WHERE user_id = ${userId}`) as any[];
+  if (rows.length === 0) return { ...DEFAULT_SETTINGS };
+  const r = rows[0];
+  const s: UserSettings = { ...DEFAULT_SETTINGS };
+  if (typeof r.language === 'string' && (LANGUAGES as readonly string[]).includes(r.language)) s.language = r.language;
+  if (typeof r.reduce_motion === 'boolean') s.reduceMotion = r.reduce_motion;
+  if (typeof r.hide_like_counts === 'boolean') s.hideLikeCounts = r.hide_like_counts;
+  if (typeof r.sensitive_content_level === 'string' && (SENSITIVE_LEVELS as readonly string[]).includes(r.sensitive_content_level)) s.sensitiveContentLevel = r.sensitive_content_level;
+  if (typeof r.save_story_to_archive === 'boolean') s.saveStoryToArchive = r.save_story_to_archive;
+  if (typeof r.story_replies === 'string' && (STORY_REPLIES as readonly string[]).includes(r.story_replies)) s.storyReplies = r.story_replies;
+  if (typeof r.who_can_comment === 'string' && (WHO_CAN_COMMENT as readonly string[]).includes(r.who_can_comment)) s.whoCanComment = r.who_can_comment;
+  if (typeof r.gif_comments === 'boolean') s.gifComments = r.gif_comments;
+  if (typeof r.allow_story_shares === 'boolean') s.allowStoryShares = r.allow_story_shares;
+  if (typeof r.account_type === 'string' && (ACCOUNT_TYPES as readonly string[]).includes(r.account_type)) s.accountType = r.account_type;
+  if (typeof r.ai_generated_label === 'boolean') s.aiGeneratedLabel = r.ai_generated_label;
+  if (typeof r.show_account_suggestions === 'boolean') s.showAccountSuggestions = r.show_account_suggestions;
+  if (typeof r.gender === 'string' && (GENDERS as readonly string[]).includes(r.gender)) s.gender = r.gender;
+  else if (r.gender === null || r.gender === undefined) s.gender = null;
+  for (const [snake, camel] of [
+    ['notify_follow', 'notifyFollow'], ['notify_follow_request', 'notifyFollowRequest'],
+    ['notify_comment', 'notifyComment'], ['notify_mention', 'notifyMention'],
+    ['notify_message', 'notifyMessage'], ['notify_slash', 'notifySlash'],
+    ['notify_drop', 'notifyDrop'],
+  ] as const) {
+    if (typeof r[snake] === 'boolean') (s as any)[camel] = r[snake];
+  }
+  return s;
+}
+
+/** Validate a settings PATCH body against the current settings.
+ *  Returns the merged settings, or an error string (→ 400). Unknown
+ *  keys are ignored; a present key with the wrong type/value is an error. */
+export function parseSettings(body: any, current: UserSettings): UserSettings | string {
+  const s: UserSettings = { ...current };
+  const checkBool = (key: keyof UserSettings): string | null => {
+    if (body[key] === undefined) return null;
+    if (typeof body[key] !== 'boolean') return `${key} must be true or false.`;
+    (s as any)[key] = body[key];
+    return null;
+  };
+  const checkEnum = (key: keyof UserSettings, allowed: readonly string[]): string | null => {
+    if (body[key] === undefined) return null;
+    if (typeof body[key] !== 'string' || !allowed.includes(body[key])) {
+      return `Invalid value for ${key}.`;
+    }
+    (s as any)[key] = body[key];
+    return null;
+  };
+  let err: string | null;
+  if ((err = checkEnum('language', LANGUAGES))) return err;
+  if ((err = checkBool('reduceMotion'))) return err;
+  if ((err = checkBool('hideLikeCounts'))) return err;
+  if ((err = checkEnum('sensitiveContentLevel', SENSITIVE_LEVELS))) return err;
+  if ((err = checkBool('saveStoryToArchive'))) return err;
+  if ((err = checkEnum('storyReplies', STORY_REPLIES))) return err;
+  if ((err = checkEnum('whoCanComment', WHO_CAN_COMMENT))) return err;
+  if ((err = checkBool('gifComments'))) return err;
+  if ((err = checkBool('allowStoryShares'))) return err;
+  if ((err = checkEnum('accountType', ACCOUNT_TYPES))) return err;
+  if ((err = checkBool('aiGeneratedLabel'))) return err;
+  if ((err = checkBool('showAccountSuggestions'))) return err;
+  if (body.gender !== undefined) {
+    if (body.gender === null || body.gender === '') s.gender = null;
+    else if (typeof body.gender === 'string' && (GENDERS as readonly string[]).includes(body.gender)) s.gender = body.gender;
+    else return 'Invalid value for gender.';
+  }
+  for (const k of ['notifyFollow', 'notifyFollowRequest', 'notifyComment', 'notifyMention', 'notifyMessage', 'notifySlash', 'notifyDrop'] as const) {
+    if ((err = checkBool(k))) return err;
+  }
+  return s;
+}
+
+export async function saveSettings(sql: Sql, userId: number, s: UserSettings): Promise<void> {
+  await sql`
+    INSERT INTO user_settings
+      (user_id, language, reduce_motion, hide_like_counts, sensitive_content_level,
+       save_story_to_archive, story_replies, who_can_comment, gif_comments,
+       allow_story_shares, account_type, ai_generated_label, show_account_suggestions,
+       gender, notify_follow, notify_follow_request, notify_comment, notify_mention,
+       notify_message, notify_slash, notify_drop, updated_at)
+    VALUES (${userId}, ${s.language}, ${s.reduceMotion}, ${s.hideLikeCounts}, ${s.sensitiveContentLevel},
+      ${s.saveStoryToArchive}, ${s.storyReplies}, ${s.whoCanComment}, ${s.gifComments},
+      ${s.allowStoryShares}, ${s.accountType}, ${s.aiGeneratedLabel}, ${s.showAccountSuggestions},
+      ${s.gender}, ${s.notifyFollow}, ${s.notifyFollowRequest}, ${s.notifyComment}, ${s.notifyMention},
+      ${s.notifyMessage}, ${s.notifySlash}, ${s.notifyDrop}, NOW())
+    ON CONFLICT (user_id) DO UPDATE SET
+      language = EXCLUDED.language, reduce_motion = EXCLUDED.reduce_motion,
+      hide_like_counts = EXCLUDED.hide_like_counts,
+      sensitive_content_level = EXCLUDED.sensitive_content_level,
+      save_story_to_archive = EXCLUDED.save_story_to_archive,
+      story_replies = EXCLUDED.story_replies, who_can_comment = EXCLUDED.who_can_comment,
+      gif_comments = EXCLUDED.gif_comments, allow_story_shares = EXCLUDED.allow_story_shares,
+      account_type = EXCLUDED.account_type, ai_generated_label = EXCLUDED.ai_generated_label,
+      show_account_suggestions = EXCLUDED.show_account_suggestions,
+      gender = EXCLUDED.gender, notify_follow = EXCLUDED.notify_follow,
+      notify_follow_request = EXCLUDED.notify_follow_request,
+      notify_comment = EXCLUDED.notify_comment, notify_mention = EXCLUDED.notify_mention,
+      notify_message = EXCLUDED.notify_message, notify_slash = EXCLUDED.notify_slash,
+      notify_drop = EXCLUDED.notify_drop, updated_at = NOW()`;
+}
+
+/** Normalise a hidden word (trim, lowercase) or return an error.
+ *  Valid: 1–50 chars, letters/digits/spaces/hyphen only. */
+export function validateHiddenWord(word: unknown): { ok: true; word: string } | { ok: false; error: string } {
+  if (typeof word !== 'string') return { ok: false, error: 'Word must be text.' };
+  const w = word.trim().toLowerCase();
+  if (w.length < 1 || w.length > 50) return { ok: false, error: 'Hidden words must be 1–50 characters.' };
+  if (!/^[a-z0-9 \-]+$/.test(w)) return { ok: false, error: 'Hidden words may only contain letters, numbers, spaces and hyphens.' };
+  return { ok: true, word: w };
+}
+
+export async function getHiddenWords(sql: Sql, userId: number): Promise<string[]> {
+  const rows = (await sql`SELECT word FROM hidden_words WHERE user_id = ${userId} ORDER BY word`) as any[];
+  return rows.map((r: any) => String(r.word));
+}
+
+function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/** True when text contains any of the words as a whole word
+ *  (word-boundary, case-insensitive). Used for comment filtering. */
+export function containsHiddenWord(text: string, words: string[]): boolean {
+  for (const w of words) {
+    if (!w) continue;
+    if (new RegExp(`\\b${escapeRegExp(w)}\\b`, 'i').test(text)) return true;
+  }
+  return false;
+}
+
+/** True when any hidden word appears as an exact token in the text
+ *  (case-insensitive). Used for message-request bodies. */
+export function containsHiddenWordExact(text: string, words: string[]): boolean {
+  const tokens = new Set(text.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean));
+  return words.some((w) => tokens.has(w.toLowerCase()));
+}
+
+/** Has restrictor restricted this user? Block precedence sits above
+ *  this everywhere it is used — callers check isBlocked first. */
+export async function isRestricted(sql: Sql, restrictorId: number, restrictedId: number): Promise<boolean> {
+  const rows = (await sql`SELECT 1 FROM restricted_accounts WHERE restrictor_id = ${restrictorId} AND restricted_id = ${restrictedId} LIMIT 1`) as any[];
+  return rows.length > 0;
+}
+
 // ---------------------------------------------------------- relationships --
 export async function isBlocked(sql: Sql, a: number, b: number): Promise<boolean> {
   const rows = (await sql`SELECT 1 FROM blocks WHERE (blocker_id = ${a} AND blocked_id = ${b}) OR (blocker_id = ${b} AND blocked_id = ${a}) LIMIT 1`) as any[];
@@ -348,8 +612,26 @@ export function publicProfile(
   };
 }
 
+/** Notification type → the recipient's settings pref that gates it.
+ *  Missing settings row = all true (getSettings returns defaults). */
+const NOTIFY_PREF: Record<string, keyof UserSettings> = {
+  follow: 'notifyFollow',
+  follow_request: 'notifyFollowRequest',
+  follow_accepted: 'notifyFollow',
+  comment: 'notifyComment',
+  mention: 'notifyMention',
+  message: 'notifyMessage',
+  slash: 'notifySlash',
+  drop: 'notifyDrop',
+};
+
 export async function notify(sql: Sql, userId: number, type: string, body: string): Promise<void> {
   try {
+    const pref = NOTIFY_PREF[type];
+    if (pref) {
+      const settings = await getSettings(sql, userId);
+      if (settings[pref] === false) return;
+    }
     await sql`INSERT INTO notifications (user_id, type, body) VALUES (${userId}, ${type}, ${body})`;
   } catch { /* notifications must never break the request */ }
 }

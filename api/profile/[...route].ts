@@ -35,6 +35,24 @@ import {
   handleSaved,
   handleReport,
   handleCreateConversation,
+  // DROP Settings (2026-11-19) — same single function, no new files.
+  handleSettings,
+  handleCloseFriends,
+  handleHideStoryFrom,
+  handleRestricted,
+  handleMutedList,
+  handleHiddenWords,
+  handleNotificationsList,
+  handleNotificationsRead,
+  handleArchive,
+  handleApps,
+  handleStatus,
+  handleMessageRequestsList,
+  handleMessageRequestAnswer,
+  handlePostComments,
+  handleSlashCreate,
+  handleSlashAnswer,
+  handleSlashLeave,
 } from '../lib/profile-handlers.js';
 
 export default async function handler(req: any, res: any): Promise<void> {
@@ -54,11 +72,42 @@ export default async function handler(req: any, res: any): Promise<void> {
   };
 
   const [a, b] = segments;
+  const c = segments[2];
   if (segments.length === 1 && a === 'me') return handleMe(req, res);
   if (segments.length === 2 && a === 'me' && b === 'privacy') return handlePrivacy(req, res);
   if (segments.length === 2 && a === 'me' && b === 'blocks') return handleBlocks(req, res);
   if (segments.length === 2 && a === 'me' && b === 'follow-requests') return handleFollowRequestsList(req, res);
   if (segments.length === 2 && a === 'me' && b === 'saved') return handleSaved(req, res);
+  // DROP Settings (2026-11-19) — all inside this router, no new files.
+  if (segments.length === 2 && a === 'me' && b === 'settings') return handleSettings(req, res);
+  if (segments.length === 2 && a === 'me' && b === 'close-friends') return handleCloseFriends(req, res);
+  if (segments.length === 2 && a === 'me' && b === 'hide-story-from') return handleHideStoryFrom(req, res);
+  if (segments.length === 2 && a === 'me' && b === 'restricted') return handleRestricted(req, res);
+  if (segments.length === 2 && a === 'me' && b === 'muted') return handleMutedList(req, res);
+  if (segments.length === 2 && a === 'me' && b === 'hidden-words') return handleHiddenWords(req, res);
+  if (segments.length === 2 && a === 'me' && b === 'notifications') return handleNotificationsList(req, res);
+  if (segments.length === 3 && a === 'me' && b === 'notifications' && c === 'read') return handleNotificationsRead(req, res);
+  if (segments.length === 2 && a === 'me' && b === 'archive') return handleArchive(req, res);
+  if (segments.length === 2 && a === 'me' && b === 'apps') return handleApps(req, res);
+  if (segments.length === 2 && a === 'me' && b === 'status') return handleStatus(req, res);
+  if (segments.length === 2 && a === 'me' && b === 'message-requests') return handleMessageRequestsList(req, res);
+  if (segments.length === 3 && a === 'me' && b === 'message-requests') {
+    setQuery({ id: c });
+    return handleMessageRequestAnswer(req, res);
+  }
+  // Post comments: /api/profile/posts/<id>/comments (GET + POST).
+  if (segments.length === 3 && a === 'posts' && /^\d+$/.test(b) && c === 'comments') {
+    setQuery({ postId: Number(b) });
+    return handlePostComments(req, res);
+  }
+  // Slash: POST /api/profile/slash-invitations,
+  // POST /api/profile/slash-invitations/<id>, POST /api/profile/slash-leave.
+  if (segments.length === 1 && a === 'slash-invitations' && req.method === 'POST') return handleSlashCreate(req, res);
+  if (segments.length === 2 && a === 'slash-invitations' && req.method === 'POST') {
+    setQuery({ id: b });
+    return handleSlashAnswer(req, res);
+  }
+  if (segments.length === 1 && a === 'slash-leave' && req.method === 'POST') return handleSlashLeave(req, res);
   // Profile content lists: /api/profile/<userId>/posts|reels|drops
   if (segments.length === 2 && /^\d+$/.test(a) && (b === 'posts' || b === 'reels' || b === 'drops')) {
     setQuery({ userId: Number(a) });

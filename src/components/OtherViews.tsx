@@ -2,7 +2,7 @@ import { useState } from 'react';
 import type { User } from '../lib/api';
 import {
   listReels, createReel, listClubrooms, createClubroom, joinClubroom,
-  searchAll, listNotifications, markNotificationsRead, listSaved,
+  searchAll, listServerNotifications, markNotificationsRead, listSaved,
   followUser, blockUser, reportUser,
 } from '../lib/api';
 import type { Post } from '../lib/api';
@@ -72,13 +72,26 @@ export function SearchView({ users, onOpenProfile }: { users: User[]; onOpenProf
 export function NotificationsView() {
   const [notes, setNotes] = useState<{ id: number; type: string; body: string; read: boolean }[]>([]);
   const [loaded, setLoaded] = useState(false);
-  if (!loaded) { void listNotifications().then((n) => { setNotes(n); setLoaded(true); }); }
+  const [error, setError] = useState('');
+  if (!loaded) {
+    void listServerNotifications()
+      .then((n) => { setNotes(n); setLoaded(true); })
+      .catch((e) => { setError(e instanceof Error ? e.message : 'Could not load notifications.'); setLoaded(true); });
+  }
   return (
     <div style={{ padding: 12 }}>
       <h2>Notifications</h2>
-      <button className="ghost" onClick={async () => { await markNotificationsRead(); setNotes(await listNotifications()); }}>Mark all read</button>
-      {notes.length === 0 && <p className="muted">No notifications.</p>}
-      {notes.map((n) => <div key={n.id} className="card">{n.read ? '' : '● '}{n.type}: {n.body}</div>)}
+      <button className="ghost" onClick={async () => { await markNotificationsRead(); setNotes(await listServerNotifications()); }}>Mark all read</button>
+      {error && <div className="notice">{error}</div>}
+      {notes.length === 0 && loaded && <p className="muted">No notifications.</p>}
+      {notes.map((n) => (
+        <button
+          key={n.id} className="card" style={{ display: 'block', width: '100%', textAlign: 'left', background: 'none', border: 'none', borderBottom: '1px solid var(--border)', cursor: 'pointer' }}
+          onClick={async () => { if (!n.read) { await markNotificationsRead(n.id); setNotes(await listServerNotifications()); } }}
+        >
+          {n.read ? '' : '● '}{n.type}: {n.body}
+        </button>
+      ))}
     </div>
   );
 }

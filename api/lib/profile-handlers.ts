@@ -3,22 +3,30 @@ import {
   audit,
   canMessage,
   canViewFullProfile,
+  containsHiddenWord,
+  containsHiddenWordExact,
   ensureProfileTables,
+  getHiddenWords,
   getPrivacy,
+  getSettings,
   getSql,
   getUserById,
   getUserByUsername,
   handleError,
   isBlocked,
   isFollowing,
+  isRestricted,
   notify,
   parsePrivacy,
+  parseSettings,
   pendingRequest,
   profileCounts,
   publicProfile,
   requireAuth,
   savePrivacy,
+  saveSettings,
   validateBio,
+  validateHiddenWord,
   validateLinks,
   validateUsername,
 } from './profile.js';
@@ -159,7 +167,30 @@ export async function handlePublicProfile(req: any, res: any): Promise<void> {
       else if (await pendingRequest(sql, viewerId, target.id)) relationship = 'requested';
     }
     const canMsg = await canMessage(sql, viewerId, target as any);
-    res.status(200).json({ ok: true, profile: publicProfile(target as any, { full, counts, relationship, canMessage: canMsg }) });
+    // Settings-driven extras (2026-11-19): presence + interaction prefs.
+    // lastActiveAt is null when the target hides activity status, or
+    // when the viewer is restricted by the target.
+    const settings = await getSettings(sql, target.id);
+    const targetPrivacy = await getPrivacy(sql, target.id);
+    const viewerRestricted = viewerId !== null && viewerId !== target.id
+      ? await isRestricted(sql, target.id, viewerId)
+      : false;
+    const lastActiveAt = targetPrivacy.activity_status && !viewerRestricted
+      ? ((target as any).last_active_at ?? null)
+      : null;
+    res.status(200).json({
+      ok: true,
+      profile: {
+        ...publicProfile(target as any, { full, counts, relationship, canMessage: canMsg }),
+        lastActiveAt,
+        interaction: {
+          storyReplies: settings.storyReplies,
+          whoCanComment: settings.whoCanComment,
+          gifComments: settings.gifComments,
+          allowStoryShares: settings.allowStoryShares,
+        },
+      },
+    });
   } catch (err) {
     handleError(res, err);
   }
@@ -601,10 +632,37 @@ export async function handleCreatePost(req: any, res: any): Promise<void> {
       try { JSON.parse(raw); } catch { throw new HttpError(400, 'Invalid post extras.'); }
       extrasJson = raw;
     }
+    // Mentions (2026-11-19 Settings): a mentionUserId in extras is
+    // checked against the mentioned user's stored who_can_mention.
+    let mentionUserId: number | null = null;
+    if (extrasJson) {
+      try {
+        const ex = JSON.parse(extrasJson);
+        if (typeof ex?.mentionUserId === 'number' && Number.isInteger(ex.mentionUserId)) mentionUserId = ex.mentionUserId;
+      } catch { /* already validated above */ }
+    }
+    let mentioned: any = null;
+    if (mentionUserId !== null && mentionUserId !== me.id) {
+      mentioned = await getUserById(sql, mentionUserId);
+      if (mentioned) {
+        const mp = await getPrivacy(sql, mentioned.id);
+        if (mp.who_can_mention === 'nobody') throw new HttpError(400, 'This account does not allow mentions.');
+        if (mp.who_can_mention === 'friends') {
+          const [a, b] = await Promise.all([
+            isFollowing(sql, me.id, mentioned.id),
+            isFollowing(sql, mentioned.id, me.id),
+          ]);
+          if (!(a && b)) throw new HttpError(400, 'This account only allows mentions from friends.');
+        }
+      }
+    }
     const rows = (await sql`
       INSERT INTO posts (author_id, caption, media_url, filter, effect, extras_json)
       VALUES (${me.id}, ${caption}, ${mediaUrl}, ${filter}, ${effect}, ${extrasJson ? extrasJson : null}::jsonb)
       RETURNING *`) as any[];
+    if (mentioned) {
+      await notify(sql, mentioned.id, 'mention', `${me.username} mentioned you in a post.`);
+    }
     res.status(200).json({ ok: true, post: fmtPost(rows[0]) });
   } catch (err) {
     handleError(res, err);
@@ -784,6 +842,29 @@ export async function handleReport(req: any, res: any): Promise<void> {
 // server-side (the old client never checked it, and no code path in the
 // app ever created a conversation at all — the Message button led to an
 // empty inbox). Blocked either way is rejected.
+// Settings (2026-11-19): when the target only accepts messages from
+// friends, a non-friend gets a message request instead (200, NOT an
+// error); 'nobody' is still a 403. A request body matching one of the
+// recipient's hidden words is stored as status 'hidden' and not notified.
+
+/** Find the 1:1 conversation between a and b, or create it. */
+async function findOrCreateConversation(sql: Sql, a: number, b: number): Promise<number> {
+  const existing = (await sql`
+    SELECT c.id FROM conversations c
+    JOIN conversation_members m1 ON m1.conversation_id = c.id AND m1.user_id = ${a}
+    JOIN conversation_members m2 ON m2.conversation_id = c.id AND m2.user_id = ${b}
+    WHERE NOT EXISTS (
+      SELECT 1 FROM conversation_members m3
+      WHERE m3.conversation_id = c.id AND m3.user_id NOT IN (${a}, ${b})
+    )
+    LIMIT 1`) as any[];
+  if (existing.length > 0) return existing[0].id as number;
+  const created = (await sql`INSERT INTO conversations DEFAULT VALUES RETURNING id`) as any[];
+  const convId = created[0].id as number;
+  await sql`INSERT INTO conversation_members (conversation_id, user_id) VALUES (${convId}, ${a}), (${convId}, ${b}) ON CONFLICT DO NOTHING`;
+  return convId;
+}
+
 export async function handleCreateConversation(req: any, res: any): Promise<void> {
   try {
     if (req.method !== 'POST') {
@@ -798,13 +879,8 @@ export async function handleCreateConversation(req: any, res: any): Promise<void
     const target = await getUserById(sql, targetId);
     if (!target) throw new HttpError(404, 'Profile not found.');
     if (await isBlocked(sql, me.id, targetId)) throw new HttpError(403, 'You cannot message this account.');
-    if (!(await canMessage(sql, me.id, target as any))) {
-      const prefs = await getPrivacy(sql, targetId);
-      throw new HttpError(403, prefs.who_can_message === 'nobody'
-        ? 'This account does not accept messages.'
-        : 'This account only accepts messages from friends.');
-    }
-    const existing = (await sql`
+    // A conversation that already exists can always be reopened.
+    const already = (await sql`
       SELECT c.id FROM conversations c
       JOIN conversation_members m1 ON m1.conversation_id = c.id AND m1.user_id = ${me.id}
       JOIN conversation_members m2 ON m2.conversation_id = c.id AND m2.user_id = ${targetId}
@@ -813,14 +889,670 @@ export async function handleCreateConversation(req: any, res: any): Promise<void
         WHERE m3.conversation_id = c.id AND m3.user_id NOT IN (${me.id}, ${targetId})
       )
       LIMIT 1`) as any[];
-    if (existing.length > 0) {
-      res.status(200).json({ ok: true, conversationId: existing[0].id });
+    if (already.length > 0) {
+      res.status(200).json({ ok: true, conversationId: already[0].id });
       return;
     }
-    const created = (await sql`INSERT INTO conversations DEFAULT VALUES RETURNING id`) as any[];
-    const convId = created[0].id as number;
-    await sql`INSERT INTO conversation_members (conversation_id, user_id) VALUES (${convId}, ${me.id}), (${convId}, ${targetId}) ON CONFLICT DO NOTHING`;
+    if (!(await canMessage(sql, me.id, target as any))) {
+      const prefs = await getPrivacy(sql, targetId);
+      if (prefs.who_can_message === 'nobody') {
+        throw new HttpError(403, 'This account does not accept messages.');
+      }
+      // 'friends': file a message request instead of an error.
+      const body = req.body?.body === undefined || req.body?.body === null ? null : String(req.body.body);
+      if (body !== null && body.length > 500) throw new HttpError(400, 'Message request must be 500 characters or fewer.');
+      const pending = (await sql`SELECT * FROM message_requests WHERE sender_id = ${me.id} AND recipient_id = ${targetId} AND status = 'pending'`) as any[];
+      if (pending.length > 0) {
+        res.status(200).json({ ok: true, status: 'requested', requestId: pending[0].id });
+        return;
+      }
+      const hidden = body !== null && containsHiddenWordExact(body, await getHiddenWords(sql, targetId));
+      const created = (await sql`
+        INSERT INTO message_requests (sender_id, recipient_id, body, status)
+        VALUES (${me.id}, ${targetId}, ${body}, ${hidden ? 'hidden' : 'pending'})
+        RETURNING *`) as any[];
+      await audit(sql, me.id, 'message_requested', String(targetId));
+      if (!hidden) {
+        await notify(sql, targetId, 'message', `${me.username} sent you a message request.`);
+      }
+      res.status(200).json({ ok: true, status: 'requested', requestId: created[0].id });
+      return;
+    }
+    const convId = await findOrCreateConversation(sql, me.id, targetId);
     res.status(200).json({ ok: true, conversationId: convId });
+  } catch (err) {
+    handleError(res, err);
+  }
+}
+
+// ------------------------------------------------------- DROP Settings ----
+// All routes below are Settings (2026-11-19), inside this same router.
+// Fail-closed: requireAuth gives 503 (no DB) / 401 (no/invalid Bearer);
+// invalid input is 400; block precedence is checked before any other
+// setting on every add.
+
+function fmtBrief(r: any): Record<string, unknown> {
+  return { id: r.id, username: r.username, displayName: r.display_name, avatarUrl: r.avatar_url ?? null };
+}
+
+// GET/PATCH /api/profile/me/settings
+export async function handleSettings(req: any, res: any): Promise<void> {
+  try {
+    const { sql, me } = await requireAuth(req);
+    if (req.method === 'GET') {
+      res.status(200).json({ ok: true, settings: await getSettings(sql, me.id) });
+      return;
+    }
+    if (req.method !== 'PATCH') {
+      res.setHeader('Allow', 'GET, PATCH');
+      res.status(405).json({ ok: false, error: 'Method not allowed.' });
+      return;
+    }
+    const current = await getSettings(sql, me.id);
+    const parsed = parseSettings(req.body ?? {}, current);
+    if (typeof parsed === 'string') throw new HttpError(400, parsed);
+    await saveSettings(sql, me.id, parsed);
+    await audit(sql, me.id, 'settings_updated', JSON.stringify(parsed));
+    res.status(200).json({ ok: true, settings: parsed });
+  } catch (err) {
+    handleError(res, err);
+  }
+}
+
+// GET/POST/DELETE /api/profile/me/<list> — close-friends,
+// hide-story-from, restricted. GET lists brief user rows; POST
+// {userId} adds; DELETE ?userId= removes. Self-add → 400, unknown
+// target → 404, blocked either way → 403 on add.
+// NOTE: table/column names are literal in each handler — Neon tagged
+// templates bind ${...} values as parameters, which cannot stand in
+// for identifiers, so the three lists do not share one dynamic query.
+
+async function relationTarget(sql: Sql, me: any, targetId: number, checkBlocked: boolean): Promise<any> {
+  if (!Number.isInteger(targetId) || targetId <= 0) throw new HttpError(400, 'Invalid user.');
+  if (targetId === me.id) throw new HttpError(400, 'You cannot add yourself to this list.');
+  const target = await getUserById(sql, targetId);
+  if (!target) throw new HttpError(404, 'Profile not found.');
+  if (checkBlocked && (await isBlocked(sql, me.id, targetId))) {
+    throw new HttpError(403, 'You cannot add this account.');
+  }
+  return target;
+}
+
+export async function handleCloseFriends(req: any, res: any): Promise<void> {
+  try {
+    const { sql, me } = await requireAuth(req);
+    if (req.method === 'GET') {
+      const rows = (await sql`
+        SELECT u.id, u.username, u.display_name, u.avatar_url FROM close_friends t
+        JOIN users u ON u.id = t.friend_id
+        WHERE t.user_id = ${me.id} ORDER BY u.display_name`) as any[];
+      res.status(200).json({ ok: true, users: rows.map(fmtBrief) });
+      return;
+    }
+    if (req.method === 'POST') {
+      const target = await relationTarget(sql, me, Number(req.body?.userId), true);
+      await sql`INSERT INTO close_friends (user_id, friend_id) VALUES (${me.id}, ${target.id}) ON CONFLICT DO NOTHING`;
+      await audit(sql, me.id, 'close_friend_added', String(target.id));
+      res.status(200).json({ ok: true, user: fmtBrief(target as any) });
+      return;
+    }
+    if (req.method !== 'DELETE') {
+      res.setHeader('Allow', 'GET, POST, DELETE');
+      res.status(405).json({ ok: false, error: 'Method not allowed.' });
+      return;
+    }
+    const target = await relationTarget(sql, me, Number(req.query?.userId), false);
+    await sql`DELETE FROM close_friends WHERE user_id = ${me.id} AND friend_id = ${target.id}`;
+    await audit(sql, me.id, 'close_friend_removed', String(target.id));
+    res.status(200).json({ ok: true });
+  } catch (err) {
+    handleError(res, err);
+  }
+}
+
+export async function handleHideStoryFrom(req: any, res: any): Promise<void> {
+  try {
+    const { sql, me } = await requireAuth(req);
+    if (req.method === 'GET') {
+      const rows = (await sql`
+        SELECT u.id, u.username, u.display_name, u.avatar_url FROM story_hidden_from t
+        JOIN users u ON u.id = t.hidden_id
+        WHERE t.user_id = ${me.id} ORDER BY u.display_name`) as any[];
+      res.status(200).json({ ok: true, users: rows.map(fmtBrief) });
+      return;
+    }
+    if (req.method === 'POST') {
+      const target = await relationTarget(sql, me, Number(req.body?.userId), true);
+      await sql`INSERT INTO story_hidden_from (user_id, hidden_id) VALUES (${me.id}, ${target.id}) ON CONFLICT DO NOTHING`;
+      await audit(sql, me.id, 'story_hidden_added', String(target.id));
+      res.status(200).json({ ok: true, user: fmtBrief(target as any) });
+      return;
+    }
+    if (req.method !== 'DELETE') {
+      res.setHeader('Allow', 'GET, POST, DELETE');
+      res.status(405).json({ ok: false, error: 'Method not allowed.' });
+      return;
+    }
+    const target = await relationTarget(sql, me, Number(req.query?.userId), false);
+    await sql`DELETE FROM story_hidden_from WHERE user_id = ${me.id} AND hidden_id = ${target.id}`;
+    await audit(sql, me.id, 'story_hidden_removed', String(target.id));
+    res.status(200).json({ ok: true });
+  } catch (err) {
+    handleError(res, err);
+  }
+}
+
+export async function handleRestricted(req: any, res: any): Promise<void> {
+  try {
+    const { sql, me } = await requireAuth(req);
+    if (req.method === 'GET') {
+      const rows = (await sql`
+        SELECT u.id, u.username, u.display_name, u.avatar_url FROM restricted_accounts t
+        JOIN users u ON u.id = t.restricted_id
+        WHERE t.restrictor_id = ${me.id} ORDER BY u.display_name`) as any[];
+      res.status(200).json({ ok: true, users: rows.map(fmtBrief) });
+      return;
+    }
+    if (req.method === 'POST') {
+      const target = await relationTarget(sql, me, Number(req.body?.userId), true);
+      await sql`INSERT INTO restricted_accounts (restrictor_id, restricted_id) VALUES (${me.id}, ${target.id}) ON CONFLICT DO NOTHING`;
+      await audit(sql, me.id, 'restricted_added', String(target.id));
+      res.status(200).json({ ok: true, user: fmtBrief(target as any) });
+      return;
+    }
+    if (req.method !== 'DELETE') {
+      res.setHeader('Allow', 'GET, POST, DELETE');
+      res.status(405).json({ ok: false, error: 'Method not allowed.' });
+      return;
+    }
+    const target = await relationTarget(sql, me, Number(req.query?.userId), false);
+    await sql`DELETE FROM restricted_accounts WHERE restrictor_id = ${me.id} AND restricted_id = ${target.id}`;
+    await audit(sql, me.id, 'restricted_removed', String(target.id));
+    res.status(200).json({ ok: true });
+  } catch (err) {
+    handleError(res, err);
+  }
+}
+
+// GET /api/profile/me/muted — mute/unmute stay on the existing /mute route.
+export async function handleMutedList(req: any, res: any): Promise<void> {
+  try {
+    if (req.method !== 'GET') {
+      res.setHeader('Allow', 'GET');
+      res.status(405).json({ ok: false, error: 'Method not allowed.' });
+      return;
+    }
+    const { sql, me } = await requireAuth(req);
+    const rows = (await sql`
+      SELECT u.id, u.username, u.display_name, u.avatar_url FROM mutes m
+      JOIN users u ON u.id = m.muted_id WHERE m.muter_id = ${me.id} ORDER BY u.display_name`) as any[];
+    res.status(200).json({ ok: true, users: rows.map(fmtBrief) });
+  } catch (err) {
+    handleError(res, err);
+  }
+}
+
+// GET/POST/DELETE /api/profile/me/hidden-words — max 100 words per user.
+export async function handleHiddenWords(req: any, res: any): Promise<void> {
+  try {
+    const { sql, me } = await requireAuth(req);
+    if (req.method === 'GET') {
+      res.status(200).json({ ok: true, words: await getHiddenWords(sql, me.id) });
+      return;
+    }
+    if (req.method === 'POST') {
+      const checked = validateHiddenWord(req.body?.word);
+      if (!checked.ok) throw new HttpError(400, checked.error);
+      const existing = await getHiddenWords(sql, me.id);
+      if (!existing.includes(checked.word) && existing.length >= 100) {
+        throw new HttpError(400, 'You can hide up to 100 words.');
+      }
+      await sql`INSERT INTO hidden_words (user_id, word) VALUES (${me.id}, ${checked.word}) ON CONFLICT DO NOTHING`;
+      await audit(sql, me.id, 'hidden_word_added', checked.word);
+      res.status(200).json({ ok: true, words: await getHiddenWords(sql, me.id) });
+      return;
+    }
+    if (req.method !== 'DELETE') {
+      res.setHeader('Allow', 'GET, POST, DELETE');
+      res.status(405).json({ ok: false, error: 'Method not allowed.' });
+      return;
+    }
+    const checked = validateHiddenWord(req.query?.word);
+    if (!checked.ok) throw new HttpError(400, checked.error);
+    await sql`DELETE FROM hidden_words WHERE user_id = ${me.id} AND word = ${checked.word}`;
+    await audit(sql, me.id, 'hidden_word_removed', checked.word);
+    res.status(200).json({ ok: true, words: await getHiddenWords(sql, me.id) });
+  } catch (err) {
+    handleError(res, err);
+  }
+}
+
+// GET /api/profile/me/notifications — newest first, limit 100.
+export async function handleNotificationsList(req: any, res: any): Promise<void> {
+  try {
+    if (req.method !== 'GET') {
+      res.setHeader('Allow', 'GET');
+      res.status(405).json({ ok: false, error: 'Method not allowed.' });
+      return;
+    }
+    const { sql, me } = await requireAuth(req);
+    const rows = (await sql`
+      SELECT id, type, body, read, created_at FROM notifications
+      WHERE user_id = ${me.id} ORDER BY created_at DESC LIMIT 100`) as any[];
+    res.status(200).json({
+      ok: true,
+      notifications: rows.map((r: any) => ({
+        id: r.id, type: r.type, body: r.body, read: Boolean(r.read), createdAt: r.created_at,
+      })),
+    });
+  } catch (err) {
+    handleError(res, err);
+  }
+}
+
+// POST /api/profile/me/notifications/read {id?} — one, or all when omitted.
+export async function handleNotificationsRead(req: any, res: any): Promise<void> {
+  try {
+    if (req.method !== 'POST') {
+      res.setHeader('Allow', 'POST');
+      res.status(405).json({ ok: false, error: 'Method not allowed.' });
+      return;
+    }
+    const { sql, me } = await requireAuth(req);
+    const id = req.body?.id === undefined || req.body?.id === null ? null : Number(req.body.id);
+    if (id !== null && (!Number.isInteger(id) || id <= 0)) throw new HttpError(400, 'Invalid notification.');
+    if (id === null) {
+      await sql`UPDATE notifications SET read = TRUE WHERE user_id = ${me.id}`;
+    } else {
+      await sql`UPDATE notifications SET read = TRUE WHERE user_id = ${me.id} AND id = ${id}`;
+    }
+    res.status(200).json({ ok: true });
+  } catch (err) {
+    handleError(res, err);
+  }
+}
+
+function fmtArchive(r: any): Record<string, unknown> {
+  return {
+    id: r.id, userId: r.user_id, mediaUrl: r.media_url ?? null,
+    filter: r.filter ?? 'original', effect: r.effect ?? 'none',
+    extrasJson: typeof r.extras_json === 'string' ? r.extras_json : (r.extras_json ? JSON.stringify(r.extras_json) : null),
+    originalCreatedAt: r.original_created_at ?? null, archivedAt: r.archived_at,
+  };
+}
+
+// POST/GET/DELETE /api/profile/me/archive
+export async function handleArchive(req: any, res: any): Promise<void> {
+  try {
+    const { sql, me } = await requireAuth(req);
+    if (req.method === 'GET') {
+      const rows = (await sql`SELECT * FROM story_archive WHERE user_id = ${me.id} ORDER BY archived_at DESC`) as any[];
+      res.status(200).json({ ok: true, archive: rows.map(fmtArchive) });
+      return;
+    }
+    if (req.method === 'POST') {
+      const body = req.body ?? {};
+      const mediaUrl = cleanShortString(body.mediaUrl, 5000);
+      const filter = cleanShortString(body.filter, 40) ?? 'original';
+      const effect = cleanShortString(body.effect, 40) ?? 'none';
+      let extrasJson: string | null = null;
+      if (body.extrasJson !== undefined && body.extrasJson !== null) {
+        const raw = typeof body.extrasJson === 'string' ? body.extrasJson : JSON.stringify(body.extrasJson);
+        if (raw.length > 10000) throw new HttpError(400, 'Archive extras are too large.');
+        try { JSON.parse(raw); } catch { throw new HttpError(400, 'Invalid archive extras.'); }
+        extrasJson = raw;
+      }
+      let originalCreatedAt: string | null = null;
+      if (body.originalCreatedAt !== undefined && body.originalCreatedAt !== null) {
+        const ms = Date.parse(String(body.originalCreatedAt));
+        if (Number.isNaN(ms)) throw new HttpError(400, 'originalCreatedAt must be a valid date.');
+        originalCreatedAt = new Date(ms).toISOString();
+      }
+      const rows = (await sql`
+        INSERT INTO story_archive (user_id, media_url, filter, effect, extras_json, original_created_at)
+        VALUES (${me.id}, ${mediaUrl}, ${filter}, ${effect}, ${extrasJson ? extrasJson : null}::jsonb, ${originalCreatedAt})
+        RETURNING *`) as any[];
+      await audit(sql, me.id, 'archive_created', String(rows[0].id));
+      res.status(200).json({ ok: true, archived: fmtArchive(rows[0]) });
+      return;
+    }
+    if (req.method !== 'DELETE') {
+      res.setHeader('Allow', 'GET, POST, DELETE');
+      res.status(405).json({ ok: false, error: 'Method not allowed.' });
+      return;
+    }
+    const id = Number(req.query?.id);
+    if (!Number.isInteger(id) || id <= 0) throw new HttpError(400, 'Invalid archived story.');
+    const rows = (await sql`SELECT * FROM story_archive WHERE id = ${id} AND user_id = ${me.id}`) as any[];
+    if (rows.length === 0) throw new HttpError(404, 'Archived story not found.');
+    await sql`DELETE FROM story_archive WHERE id = ${id} AND user_id = ${me.id}`;
+    await audit(sql, me.id, 'archive_deleted', String(id));
+    res.status(200).json({ ok: true });
+  } catch (err) {
+    handleError(res, err);
+  }
+}
+
+// GET /api/profile/me/apps — Google sign-in only, from real records.
+// auth_identities is consulted first; the Google sign-in flow stores
+// google_sub on the user row (api/auth/google.ts never writes
+// auth_identities), so a user with google_sub / auth_method 'google'
+// is real evidence of a Google connection — never an invented app.
+export async function handleApps(req: any, res: any): Promise<void> {
+  try {
+    if (req.method !== 'GET') {
+      res.setHeader('Allow', 'GET');
+      res.status(405).json({ ok: false, error: 'Method not allowed.' });
+      return;
+    }
+    const { sql, me } = await requireAuth(req);
+    const identities = (await sql`SELECT * FROM auth_identities WHERE user_id = ${me.id}`) as any[];
+    const apps: Record<string, unknown>[] = [];
+    const googleIdentity = identities.find((r: any) => r.provider === 'google');
+    if (googleIdentity || (me as any).google_sub || (me as any).auth_method === 'google') {
+      apps.push({
+        provider: 'google',
+        name: 'Google sign-in',
+        email: googleIdentity?.email ?? (me as any).email ?? null,
+        connectedAt: (me as any).created_at ?? null,
+      });
+    }
+    res.status(200).json({ ok: true, apps });
+  } catch (err) {
+    handleError(res, err);
+  }
+}
+
+// GET /api/profile/me/status — real standing from the reports table.
+// No fake violations: 'review' only when reports exist against the user.
+export async function handleStatus(req: any, res: any): Promise<void> {
+  try {
+    if (req.method !== 'GET') {
+      res.setHeader('Allow', 'GET');
+      res.status(405).json({ ok: false, error: 'Method not allowed.' });
+      return;
+    }
+    const { sql, me } = await requireAuth(req);
+    const rows = (await sql`SELECT COUNT(*)::int AS c FROM reports WHERE target_id = ${me.id}`) as any[];
+    const reportsAgainstMe = rows[0]?.c ?? 0;
+    res.status(200).json({
+      ok: true,
+      status: {
+        createdAt: (me as any).created_at,
+        isPrivate: Boolean((me as any).is_private),
+        reportsAgainstMe,
+        standing: reportsAgainstMe > 0 ? 'review' : 'good',
+        note: reportsAgainstMe > 0
+          ? 'Your account has been reported. No actions have been taken on your account yet.'
+          : 'No actions have been taken on your account.',
+      },
+    });
+  } catch (err) {
+    handleError(res, err);
+  }
+}
+
+// GET /api/profile/me/message-requests — pending incoming + outgoing,
+// plus hidden incoming (status 'hidden') under `hidden`.
+export async function handleMessageRequestsList(req: any, res: any): Promise<void> {
+  try {
+    if (req.method !== 'GET') {
+      res.setHeader('Allow', 'GET');
+      res.status(405).json({ ok: false, error: 'Method not allowed.' });
+      return;
+    }
+    const { sql, me } = await requireAuth(req);
+    const incoming = (await sql`
+      SELECT mr.id, mr.sender_id, mr.body, mr.created_at, u.username, u.display_name, u.avatar_url
+      FROM message_requests mr JOIN users u ON u.id = mr.sender_id
+      WHERE mr.recipient_id = ${me.id} AND mr.status = 'pending' ORDER BY mr.created_at DESC`) as any[];
+    const hidden = (await sql`
+      SELECT mr.id, mr.sender_id, mr.body, mr.created_at, u.username, u.display_name, u.avatar_url
+      FROM message_requests mr JOIN users u ON u.id = mr.sender_id
+      WHERE mr.recipient_id = ${me.id} AND mr.status = 'hidden' ORDER BY mr.created_at DESC`) as any[];
+    const outgoing = (await sql`
+      SELECT mr.id, mr.recipient_id, mr.body, mr.created_at, u.username, u.display_name, u.avatar_url
+      FROM message_requests mr JOIN users u ON u.id = mr.recipient_id
+      WHERE mr.sender_id = ${me.id} AND mr.status = 'pending' ORDER BY mr.created_at DESC`) as any[];
+    res.status(200).json({
+      ok: true,
+      incoming: incoming.map((r: any) => ({
+        id: r.id, senderId: r.sender_id, senderUsername: r.username,
+        senderDisplayName: r.display_name, senderAvatarUrl: r.avatar_url ?? null,
+        body: r.body ?? null, createdAt: r.created_at,
+      })),
+      outgoing: outgoing.map((r: any) => ({
+        id: r.id, recipientId: r.recipient_id, recipientUsername: r.username,
+        recipientDisplayName: r.display_name, recipientAvatarUrl: r.avatar_url ?? null,
+        body: r.body ?? null, createdAt: r.created_at,
+      })),
+      hidden: hidden.map((r: any) => ({
+        id: r.id, senderId: r.sender_id, senderUsername: r.username,
+        senderDisplayName: r.display_name, senderAvatarUrl: r.avatar_url ?? null,
+        body: r.body ?? null, createdAt: r.created_at,
+      })),
+    });
+  } catch (err) {
+    handleError(res, err);
+  }
+}
+
+// POST /api/profile/me/message-requests/<id> {accept:boolean}
+export async function handleMessageRequestAnswer(req: any, res: any): Promise<void> {
+  try {
+    if (req.method !== 'POST') {
+      res.setHeader('Allow', 'POST');
+      res.status(405).json({ ok: false, error: 'Method not allowed.' });
+      return;
+    }
+    const { sql, me } = await requireAuth(req);
+    const id = Number(req.query?.id);
+    if (!Number.isInteger(id) || id <= 0) throw new HttpError(400, 'Invalid request.');
+    const rows = (await sql`SELECT * FROM message_requests WHERE id = ${id}`) as any[];
+    if (rows.length === 0) throw new HttpError(404, 'Message request not found.');
+    const mr = rows[0];
+    if (mr.recipient_id !== me.id) throw new HttpError(403, 'Only the person who received this request can answer it.');
+    if (mr.status !== 'pending') throw new HttpError(409, `This request is already ${mr.status}.`);
+    const accept = req.body?.accept === true;
+    if (accept) {
+      const convId = await findOrCreateConversation(sql, me.id, mr.sender_id);
+      await sql`UPDATE message_requests SET status = 'accepted', conversation_id = ${convId}, updated_at = NOW() WHERE id = ${id}`;
+      await notify(sql, mr.sender_id, 'message', `${me.username} accepted your message request.`);
+      await audit(sql, me.id, 'message_request_accepted', String(id));
+      res.status(200).json({ ok: true, status: 'accepted', conversationId: convId });
+    } else {
+      await sql`UPDATE message_requests SET status = 'declined', updated_at = NOW() WHERE id = ${id}`;
+      await audit(sql, me.id, 'message_request_declined', String(id));
+      res.status(200).json({ ok: true, status: 'declined' });
+    }
+  } catch (err) {
+    handleError(res, err);
+  }
+}
+
+// ------------------------------------------------------------ comments ----
+// GET/POST /api/profile/posts/<id>/comments — server-backed comments.
+// Guards: post must exist (404); blocked viewer → 404; private author +
+// viewer not allowed → 403. POST additionally enforces the author's
+// who_can_comment and hidden words.
+
+function fmtComment(r: any, author: any): Record<string, unknown> {
+  return {
+    id: r.id, postId: r.post_id, authorId: r.author_id,
+    authorUsername: author?.username ?? null,
+    authorDisplayName: author?.display_name ?? null,
+    authorAvatarUrl: author?.avatar_url ?? null,
+    body: r.body, createdAt: r.created_at,
+  };
+}
+
+async function commentPostGuard(sql: Sql, viewerId: number | null, postId: number): Promise<any> {
+  const rows = (await sql`SELECT * FROM posts WHERE id = ${postId}`) as any[];
+  if (rows.length === 0) throw new HttpError(404, 'Post not found.');
+  const post = rows[0];
+  const author = await getUserById(sql, post.author_id);
+  if (!author) throw new HttpError(404, 'Post not found.');
+  if (viewerId !== null && viewerId !== author.id && (await isBlocked(sql, viewerId, author.id))) {
+    throw new HttpError(404, 'Post not found.');
+  }
+  if (!(await canViewFullProfile(sql, viewerId, author as any))) {
+    throw new HttpError(403, 'This account is private.');
+  }
+  return { post, author };
+}
+
+export async function handlePostComments(req: any, res: any): Promise<void> {
+  try {
+    const postId = Number(req.query?.postId);
+    if (!Number.isInteger(postId) || postId <= 0) throw new HttpError(400, 'Invalid post.');
+    if (req.method === 'GET') {
+      const sql = getSql();
+      if (!sql) throw new HttpError(503, 'Shared database not configured.');
+      await ensureProfileTables(sql);
+      const viewerId = await optionalViewerId(sql, req);
+      const { post, author } = await commentPostGuard(sql, viewerId, postId);
+      const rows = (await sql`SELECT * FROM post_comments WHERE post_id = ${postId} ORDER BY created_at ASC`) as any[];
+      const viewerWords = viewerId !== null ? await getHiddenWords(sql, viewerId) : [];
+      const out: Record<string, unknown>[] = [];
+      for (const r of rows) {
+        // Comments by users the author restricted are visible only to
+        // the author and the commenter.
+        if (r.author_id !== author.id && viewerId !== author.id && viewerId !== r.author_id
+          && (await isRestricted(sql, author.id, r.author_id))) {
+          continue;
+        }
+        // Comments containing any of the VIEWER's hidden words are
+        // excluded from the viewer's list.
+        if (viewerWords.length > 0 && containsHiddenWord(String(r.body ?? ''), viewerWords)) continue;
+        const commentAuthor = r.author_id === author.id ? author : await getUserById(sql, r.author_id);
+        out.push(fmtComment(r, commentAuthor));
+      }
+      res.status(200).json({ ok: true, comments: out });
+      return;
+    }
+    if (req.method !== 'POST') {
+      res.setHeader('Allow', 'GET, POST');
+      res.status(405).json({ ok: false, error: 'Method not allowed.' });
+      return;
+    }
+    const { sql, me } = await requireAuth(req);
+    const { post, author } = await commentPostGuard(sql, me.id, postId);
+    const settings = await getSettings(sql, author.id);
+    if (settings.whoCanComment === 'off') throw new HttpError(403, 'Comments are turned off for this post.');
+    if (settings.whoCanComment === 'followers' && !(await isFollowing(sql, me.id, author.id)) && me.id !== author.id) {
+      throw new HttpError(403, 'Only followers can comment on this post.');
+    }
+    if (settings.whoCanComment === 'mutual' && me.id !== author.id) {
+      const [a, b] = await Promise.all([
+        isFollowing(sql, me.id, author.id),
+        isFollowing(sql, author.id, me.id),
+      ]);
+      if (!(a && b)) throw new HttpError(403, 'Only mutual friends can comment on this post.');
+    }
+    const body = String(req.body?.body ?? '').trim();
+    if (!body || body.length > 500) throw new HttpError(400, 'Comment must be 1–500 characters.');
+    const authorWords = await getHiddenWords(sql, author.id);
+    if (authorWords.length > 0 && containsHiddenWord(body, authorWords)) {
+      throw new HttpError(400, 'Your comment contains a word the author has chosen to hide.');
+    }
+    const created = (await sql`
+      INSERT INTO post_comments (post_id, author_id, body)
+      VALUES (${postId}, ${me.id}, ${body}) RETURNING *`) as any[];
+    await sql`UPDATE posts SET comment_count = comment_count + 1 WHERE id = ${postId}`;
+    if (author.id !== me.id) {
+      await notify(sql, author.id, 'comment', `${me.username} commented on your post.`);
+    }
+    const commentAuthor = await getUserById(sql, me.id);
+    res.status(200).json({ ok: true, comment: fmtComment(created[0], commentAuthor) });
+  } catch (err) {
+    handleError(res, err);
+  }
+}
+
+// ---------------------------------------------------------------- slash ---
+// POST /api/profile/slash-invitations {conversationId, inviteeId}
+export async function handleSlashCreate(req: any, res: any): Promise<void> {
+  try {
+    if (req.method !== 'POST') {
+      res.setHeader('Allow', 'POST');
+      res.status(405).json({ ok: false, error: 'Method not allowed.' });
+      return;
+    }
+    const { sql, me } = await requireAuth(req);
+    const conversationId = Number(req.body?.conversationId);
+    const inviteeId = Number(req.body?.inviteeId);
+    if (!Number.isInteger(conversationId) || conversationId <= 0) throw new HttpError(400, 'Invalid conversation.');
+    if (!Number.isInteger(inviteeId) || inviteeId <= 0) throw new HttpError(400, 'Invalid invitee.');
+    if (inviteeId === me.id) throw new HttpError(400, 'You cannot invite yourself.');
+    const invitee = await getUserById(sql, inviteeId);
+    if (!invitee) throw new HttpError(404, 'Profile not found.');
+    const member = (await sql`SELECT 1 FROM conversation_members WHERE conversation_id = ${conversationId} AND user_id = ${me.id} LIMIT 1`) as any[];
+    if (member.length === 0) throw new HttpError(403, 'You are not a member of this conversation.');
+    if (await isBlocked(sql, me.id, inviteeId)) throw new HttpError(403, 'You cannot invite this account.');
+    const prefs = await getPrivacy(sql, inviteeId);
+    if (prefs.who_can_slash === 'nobody') throw new HttpError(403, 'This account does not accept Slash invitations.');
+    if (prefs.who_can_slash === 'friends') {
+      const [a, b] = await Promise.all([
+        isFollowing(sql, me.id, inviteeId),
+        isFollowing(sql, inviteeId, me.id),
+      ]);
+      if (!(a && b)) throw new HttpError(403, 'This account only accepts Slash invitations from friends.');
+    }
+    const created = (await sql`
+      INSERT INTO slash_invitations (conversation_id, inviter_id, invitee_id, status)
+      VALUES (${conversationId}, ${me.id}, ${inviteeId}, 'pending') RETURNING *`) as any[];
+    await notify(sql, inviteeId, 'slash', `${me.username} invited you to a Slash conversation.`);
+    res.status(200).json({ ok: true, invitationId: created[0].id });
+  } catch (err) {
+    handleError(res, err);
+  }
+}
+
+// POST /api/profile/slash-invitations/<id> {accept:boolean}
+export async function handleSlashAnswer(req: any, res: any): Promise<void> {
+  try {
+    if (req.method !== 'POST') {
+      res.setHeader('Allow', 'POST');
+      res.status(405).json({ ok: false, error: 'Method not allowed.' });
+      return;
+    }
+    const { sql, me } = await requireAuth(req);
+    const id = Number(req.query?.id);
+    if (!Number.isInteger(id) || id <= 0) throw new HttpError(400, 'Invalid invitation.');
+    const rows = (await sql`SELECT * FROM slash_invitations WHERE id = ${id}`) as any[];
+    if (rows.length === 0) throw new HttpError(404, 'Slash invitation not found.');
+    const inv = rows[0];
+    if (inv.invitee_id !== me.id) throw new HttpError(403, 'Only the invited person can answer this invitation.');
+    if (inv.status !== 'pending') throw new HttpError(409, `This invitation is already ${inv.status}.`);
+    const accept = req.body?.accept === true;
+    if (accept) {
+      await sql`INSERT INTO conversation_members (conversation_id, user_id) VALUES (${inv.conversation_id}, ${me.id}) ON CONFLICT DO NOTHING`;
+      await sql`UPDATE slash_invitations SET status = 'accepted' WHERE id = ${id}`;
+      res.status(200).json({ ok: true, status: 'accepted' });
+    } else {
+      await sql`UPDATE slash_invitations SET status = 'declined' WHERE id = ${id}`;
+      res.status(200).json({ ok: true, status: 'declined' });
+    }
+  } catch (err) {
+    handleError(res, err);
+  }
+}
+
+// POST /api/profile/slash-leave {conversationId}
+export async function handleSlashLeave(req: any, res: any): Promise<void> {
+  try {
+    if (req.method !== 'POST') {
+      res.setHeader('Allow', 'POST');
+      res.status(405).json({ ok: false, error: 'Method not allowed.' });
+      return;
+    }
+    const { sql, me } = await requireAuth(req);
+    const conversationId = Number(req.body?.conversationId);
+    if (!Number.isInteger(conversationId) || conversationId <= 0) throw new HttpError(400, 'Invalid conversation.');
+    const member = (await sql`SELECT 1 FROM conversation_members WHERE conversation_id = ${conversationId} AND user_id = ${me.id} LIMIT 1`) as any[];
+    if (member.length === 0) throw new HttpError(403, 'You are not a member of this conversation.');
+    await sql`DELETE FROM conversation_members WHERE conversation_id = ${conversationId} AND user_id = ${me.id}`;
+    res.status(200).json({ ok: true });
   } catch (err) {
     handleError(res, err);
   }

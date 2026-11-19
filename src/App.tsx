@@ -7,10 +7,12 @@ import {
   listConversations, getUnreadCounts, followUser, getAuthStatus,
   getAdminUsers, getLocalUserCount, isOwnerEmail,
   getPublicProfile, getMyProfileServer, setDbConfigured,
-  listFollowers, listFollowing,
+  listFollowers, listFollowing, getMySettings,
 } from './lib/api';
 import type { AdminUsersData, PublicProfile } from './lib/api';
-import { ProfilePage, EditProfilePage, PrivacyPage, RoomIdentityPage } from './components/ProfileViews';
+import { ProfilePage, EditProfilePage, RoomIdentityPage } from './components/ProfileViews';
+import SettingsHub from './components/SettingsViews';
+import type { SettingsScreen } from './components/SettingsViews';
 import { renderGoogleButton } from './lib/google';
 import { subscribeToUpdates } from './lib/realtime';
 import StoryViewer from './components/StoryViewer';
@@ -21,7 +23,7 @@ import DropHub from './components/DropHub';
 import MessagesView from './components/MessagesView';
 import { ReelsView, ClubroomsView, SearchView, NotificationsView, SavedView } from './components/OtherViews';
 
-type View = 'home' | 'discover' | 'hub' | 'search' | 'profile' | 'messages' | 'clubrooms' | 'notifications' | 'saved' | 'admin' | 'edit-profile' | 'privacy' | 'room-identity';
+type View = 'home' | 'discover' | 'hub' | 'search' | 'profile' | 'messages' | 'clubrooms' | 'notifications' | 'saved' | 'admin' | 'edit-profile' | 'privacy' | 'room-identity' | 'settings';
 
 const NAV: { id: View; label: string; icon: string }[] = [
   { id: 'home', label: 'Home', icon: '🏠' },
@@ -65,6 +67,10 @@ export default function App() {
   // DM opened from a profile's Message button (createConversation).
   const [openConversationId, setOpenConversationId] = useState<number | null>(null);
   const [roomIdentity, setRoomIdentity] = useState<{ id: number; name: string } | null>(null);
+  // Settings hub sub-screen (null = hub). Profile "⚙️ Settings" opens
+  // the hub; Privacy & Security lives inside it as a screen.
+  const [settingsScreen, setSettingsScreen] = useState<SettingsScreen | null>(null);
+  const [linkError, setLinkError] = useState('');
   const googleBtnRef = useRef<HTMLDivElement | null>(null);
   const linkGoogleBtnRef = useRef<HTMLDivElement | null>(null);
 
@@ -99,6 +105,12 @@ export default function App() {
     void getSessionUser().then((u) => { if (u) setMe(u); });
     void getAuthStatus().then((s) => { setDbConfigured(s.dbConfigured); setAuthStatus(s); });
   }, []);
+
+  // Apply saved settings that affect the whole app shell (reduce motion).
+  useEffect(() => {
+    if (!me) return;
+    void getMySettings().catch(() => undefined);
+  }, [me]);
 
   // Profile (Page 04): load the public profile whenever the profile
   // view opens — my own profile, or another user's by username.
@@ -200,7 +212,7 @@ export default function App() {
         await linkGoogle(idToken);
         setAuthLinks(await getAuthLinks());
       } catch (err) {
-        alert(err instanceof Error ? err.message : 'Google linking failed.');
+        setLinkError(err instanceof Error ? err.message : 'Google linking failed.');
       }
     }).catch(() => { /* button stays unavailable; sign-in still works */ });
     return () => { cancelled = true; };
@@ -271,9 +283,9 @@ export default function App() {
     }
   };
 
-  const publishEditor = async (args: { filter: string; effect: string; extras: EditorExtras }) => {
+  const publishEditor = async (args: { filter: string; effect: string; extras: EditorExtras; audience?: 'everyone' | 'close-friends' }) => {
     if (editing === 'story') {
-      await createStory({ filter: args.filter, effect: args.effect, extrasJson: JSON.stringify(args.extras) });
+      await createStory({ filter: args.filter, effect: args.effect, extrasJson: JSON.stringify(args.extras), audience: args.audience });
     } else {
       await createPost({ caption: args.extras.text ?? 'New post', filter: args.filter, effect: args.effect, extrasJson: JSON.stringify(args.extras) });
     }
@@ -360,7 +372,7 @@ export default function App() {
       {view === 'discover' && <ReelsView />}
       {view === 'hub' && <DropHub drops={drops} onRefresh={() => void refresh()} />}
       {view === 'search' && <SearchView users={users} onOpenProfile={(username) => { setViewedUsername(username); setView('profile'); }} />}
-      {view === 'messages' && <MessagesView conversations={conversations} users={users} me={me} initialOpenId={openConversationId} />}
+      {view === 'messages' && <MessagesView conversations={conversations} users={users} me={me} initialOpenId={openConversationId} onOpenRequests={() => { setSettingsScreen('message-requests'); setView('settings'); }} />}
       {view === 'clubrooms' && <ClubroomsView me={me} onJoinIdentity={(room) => { setRoomIdentity(room); setView('room-identity'); }} />}
       {view === 'notifications' && <NotificationsView />}
       {view === 'saved' && <SavedView />}
@@ -417,7 +429,7 @@ export default function App() {
                 me={me}
                 isOwner={viewedProfile.id === me.id}
                 onEdit={() => setView('edit-profile')}
-                onPrivacy={() => setView('privacy')}
+                onPrivacy={() => { setSettingsScreen(null); setView('settings'); }}
                 onAdmin={() => setView('admin')}
                 onOpenUser={(username) => { setViewedUsername(username); setView('profile'); }}
                 onOpenConversation={async (conversationId) => {
@@ -431,6 +443,7 @@ export default function App() {
               {viewedProfile.id === me.id && (
                 <div style={{ padding: '0 12px 12px' }}>
                   <h3>Sign-in &amp; security</h3>
+                  {linkError && <div className="notice">{linkError}</div>}
                   <p>Google: {authLinks.hasGoogle ? `linked${me.email ? ` (${me.email})` : ''}` : authStatus.googleConfigured ? 'not linked' : 'coming soon — credentials needed'}</p>
                   {authStatus.googleConfigured && !authLinks.hasGoogle && <div ref={linkGoogleBtnRef} />}
                   <button className="ghost" onClick={async () => { await revokeSession(); setMe(null); }}>Sign out / revoke session</button>
@@ -451,8 +464,28 @@ export default function App() {
           onRefresh={() => void refresh()}
         />
       )}
+      {view === 'settings' && (
+        <SettingsHub
+          me={me}
+          initialScreen={settingsScreen}
+          onBack={() => setView('profile')}
+          onEditProfile={() => setView('edit-profile')}
+          onSignOut={() => setMe(null)}
+          onOpenConversation={async (conversationId) => {
+            setOpenConversationId(conversationId);
+            await refresh();
+            setView('messages');
+          }}
+        />
+      )}
       {view === 'privacy' && (
-        <PrivacyPage me={me} onBack={() => setView('profile')} onSignOut={() => setMe(null)} />
+        <SettingsHub
+          me={me}
+          initialScreen="privacy"
+          onBack={() => setView('profile')}
+          onEditProfile={() => setView('edit-profile')}
+          onSignOut={() => setMe(null)}
+        />
       )}
       {view === 'room-identity' && roomIdentity && (
         <RoomIdentityPage me={me} clubroomId={roomIdentity.id} clubroomName={roomIdentity.name} onBack={() => setView('clubrooms')} />
@@ -460,10 +493,10 @@ export default function App() {
 
       {/* Post / Story editor — mounted on every view (not just Home) so
           "Create your first post" works from the Profile page too. */}
-      {editing && <StoryEditor initialFilter="original" onPublish={publishEditor} onCancel={() => setEditing(null)} />}
+      {editing && <StoryEditor initialFilter="original" kind={editing} onPublish={publishEditor} onCancel={() => setEditing(null)} />}
 
       {viewerIndex !== null && (
-        <StoryViewer stories={stories} index={viewerIndex} onClose={() => setViewerIndex(null)} onIndex={setViewerIndex} />
+        <StoryViewer stories={stories} index={viewerIndex} onClose={() => setViewerIndex(null)} onIndex={setViewerIndex} me={me} />
       )}
 
       {!panelOpen && (

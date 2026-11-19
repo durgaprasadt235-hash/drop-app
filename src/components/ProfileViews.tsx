@@ -14,8 +14,9 @@ import {
   reportUser, listFollowersFollowing, getRoomIdentity,
   joinClubroomWithIdentity, updateRoomIdentity, revokeSession,
   createConversation, openDrop, isMutedLocal, deletePost,
+  getMySettings, updateMySettings, restrictUser, unrestrictUser, listRestricted,
 } from '../lib/api';
-import type { FollowRequestItem, RoomIdentity } from '../lib/api';
+import type { FollowRequestItem, RoomIdentity, UserSettings } from '../lib/api';
 import PostCard from './PostCard';
 import { filterCss } from '../lib/filters';
 
@@ -36,6 +37,19 @@ function Avatar({ user, size }: { user: { displayName: string; avatarUrl?: strin
       {initials(user.displayName)}
     </span>
   );
+}
+
+function formatActive(lastActiveAt: string | null | undefined): string | null {
+  if (!lastActiveAt) return null;
+  const diffMs = Date.now() - new Date(lastActiveAt).getTime();
+  if (Number.isNaN(diffMs) || diffMs < 0) return null;
+  const mins = Math.floor(diffMs / 60_000);
+  if (mins < 5) return 'Active now';
+  if (mins < 60) return `Active ${mins}m ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `Active ${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  return `Active ${days}d ago`;
 }
 
 function Toggle({ on, onChange, label }: { on: boolean; onChange: (v: boolean) => void; label: string }) {
@@ -87,8 +101,13 @@ export function ProfilePage(props: {
   const [selectedDrop, setSelectedDrop] = useState<Drop | null>(null);
   const [blocked, setBlocked] = useState(false);
   const [muted, setMuted] = useState(() => isMutedLocal(profile.id));
+  const [restricted, setRestricted] = useState(false);
+  const presence = !isOwner ? formatActive(profile.lastActiveAt) : null;
 
-  useEffect(() => { setRel(profile.relationship); setBlocked(false); setMuted(isMutedLocal(profile.id)); }, [profile.id, profile.relationship]);
+  useEffect(() => {
+    setRel(profile.relationship); setBlocked(false); setMuted(isMutedLocal(profile.id));
+    if (!isOwner) void listRestricted().then((r) => setRestricted(r.some((u) => u.id === profile.id))).catch(() => undefined);
+  }, [profile.id, profile.relationship]);
   // Content comes from the server (Neon) first — listPostsByUser and
   // friends are server-first in api.ts — so tabs and header counts
   // agree, and another user's content is visible on any device.
@@ -141,8 +160,12 @@ export function ProfilePage(props: {
       return;
     }
     try {
-      const id = await createConversation(profile.id);
-      props.onOpenConversation(id);
+      const result = await createConversation(profile.id);
+      if (typeof result === 'object') {
+        setNotice('Request sent — this account only accepts messages from friends. You’ll be able to message once they accept.');
+        return;
+      }
+      props.onOpenConversation(result);
     } catch (err) {
       setNotice(err instanceof Error ? err.message : 'Could not open this conversation.');
     }
@@ -184,6 +207,7 @@ export function ProfilePage(props: {
         </div>
         <h2 style={{ margin: '8px 0 0' }}>{profile.displayName}</h2>
         <p className="muted" style={{ margin: '2px 0' }}>@{profile.username}{profile.isPrivate ? ' · 🔒 Private' : ''}</p>
+        {presence && <p style={{ margin: '2px 0', fontSize: 13 }}>🟢 {presence}</p>}
         {profile.bio ? <p style={{ whiteSpace: 'pre-wrap' }}>{profile.bio}</p> : <p className="muted">No bio yet.</p>}
         {(profile.links ?? []).map((l) => (
           <p key={l.url} style={{ margin: '2px 0' }}><a href={l.url} target="_blank" rel="noreferrer">{l.label}</a></p>
@@ -283,6 +307,7 @@ export function ProfilePage(props: {
         {moreOpen && !isOwner && !blocked && !locked && (
           <div className="card" style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
             <button className="ghost" onClick={async () => { try { if (muted) { await unmuteUser(profile.id); setMuted(false); setNotice(`Unmuted @${profile.username}.`); } else { await muteUser(profile.id); setMuted(true); setNotice(`Muted @${profile.username}. Their posts will not appear in your feed.`); } } catch (err) { setNotice(err instanceof Error ? err.message : 'Could not change mute.'); } setMoreOpen(false); }}>{muted ? 'Unmute' : 'Mute'}</button>
+            <button className="ghost" onClick={async () => { try { if (restricted) { await unrestrictUser(profile.id); setRestricted(false); setNotice(`Unrestricted @${profile.username}.`); } else { await restrictUser(profile.id); setRestricted(true); setNotice(`Restricted @${profile.username}. Their comments are now only visible to you and them.`); } } catch (err) { setNotice(err instanceof Error ? err.message : 'Could not change restriction.'); } setMoreOpen(false); }}>{restricted ? 'Unrestrict' : 'Restrict'}</button>
             <button className="ghost" onClick={async () => { try { await blockUser(profile.id); setBlocked(true); } catch (err) { setNotice(err instanceof Error ? err.message : 'Block failed.'); } setMoreOpen(false); }}>Block</button>
             <button className="ghost" onClick={async () => { try { await reportUser(profile.id, 'Inappropriate content'); setNotice('Reported. Our team will review it.'); } catch (err) { setNotice(err instanceof Error ? err.message : 'Report failed.'); } setMoreOpen(false); }}>Report</button>
           </div>
@@ -455,6 +480,16 @@ export function EditProfilePage({ me, onBack, onSaved, onRefresh }: { me: User; 
   // Avatar preview updates immediately after an upload instead of
   // showing the old photo until the next navigation.
   const [avatarUrl, setAvatarUrl] = useState(me.avatarUrl ?? null);
+  // Settings-backed extras (gender, AI label, account suggestions).
+  const [settings, setSettings] = useState<UserSettings | null>(null);
+  useEffect(() => {
+    void getMySettings().then(setSettings).catch(() => undefined);
+  }, []);
+  const patchSettings = async (p: Partial<UserSettings>) => {
+    if (!settings) return;
+    setSettings({ ...settings, ...p });
+    try { setSettings(await updateMySettings(p)); } catch (err) { setError(err instanceof Error ? err.message : 'Could not save that setting.'); }
+  };
   const dirty = displayName !== me.displayName || username !== me.username || bio !== (me.bio ?? '')
     || location !== (me.location ?? '') || birthday !== (me.birthday ?? '')
     || linksText !== (me.links ?? []).map((l) => l.url).join('\n');
@@ -522,6 +557,27 @@ export function EditProfilePage({ me, onBack, onSaved, onRefresh }: { me: User; 
         <label>Links (one https:// URL per line, max 5)<textarea value={linksText} onChange={(e) => setLinksText(e.target.value)} rows={3} /></label>
         <label>Location<input value={location} onChange={(e) => setLocation(e.target.value)} placeholder="City, Country" /></label>
         <label>Birthday<input type="date" value={birthday} onChange={(e) => setBirthday(e.target.value)} /></label>
+        {settings && (
+          <>
+            <label>Gender
+              <select value={settings.gender} onChange={(e) => void patchSettings({ gender: e.target.value as UserSettings['gender'] })}>
+                <option value="">Prefer not to say</option>
+                <option value="female">Female</option>
+                <option value="male">Male</option>
+                <option value="other">Other</option>
+                <option value="prefer-not-to-say">Prefer not to say</option>
+              </select>
+            </label>
+            <div className="card" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <span>Label posts as AI-generated<br /><span className="muted">Adds an AI label to your posts.</span></span>
+              <Toggle label="AI-generated label" on={settings.aiGeneratedLabel} onChange={(v) => void patchSettings({ aiGeneratedLabel: v })} />
+            </div>
+            <div className="card" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <span>Show account suggestions<br /><span className="muted">Suggest your account to other people.</span></span>
+              <Toggle label="Show account suggestions" on={settings.showAccountSuggestions} onChange={(v) => void patchSettings({ showAccountSuggestions: v })} />
+            </div>
+          </>
+        )}
         {error && <div className="notice">{error}</div>}
         <p className="muted">Changing your username does not break your posts or Drops — they are linked to your account, not your username.</p>
       </div>

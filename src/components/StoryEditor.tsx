@@ -38,10 +38,13 @@ export default function StoryEditor({
   initialFilter = 'original',
   onPublish,
   onCancel,
+  kind = 'story',
 }: {
   initialFilter?: string;
-  onPublish: (args: { filter: string; effect: string; extras: EditorExtras }) => void;
+  onPublish: (args: { filter: string; effect: string; extras: EditorExtras; audience?: 'everyone' | 'close-friends' }) => void;
   onCancel: () => void;
+  /** Audience picker only applies to stories; posts are always public. */
+  kind?: 'story' | 'post';
 }) {
   const [filter, setFilter] = useState(initialFilter);
   const [effect, setEffect] = useState('none');
@@ -68,6 +71,8 @@ export default function StoryEditor({
   const [question, setQuestion] = useState('');
   const [link, setLink] = useState('');
   const [hashtag, setHashtag] = useState('');
+  const [audience, setAudience] = useState<'everyone' | 'close-friends'>('everyone');
+  const [notice, setNotice] = useState('');
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const drawing = useRef(false);
 
@@ -79,17 +84,19 @@ export default function StoryEditor({
   const stickersShown = STICKER_ENTRIES.filter((s) => s.toLowerCase().includes(stickerSearch.toLowerCase()));
 
   const toggleSticker = (name: string) => {
-    if (name === 'Music') { alert('Music is unavailable — DROP has no licensed music library yet.'); return; }
-    if (name === 'Donation') { alert('Donation is unavailable — DROP has no payments provider yet.'); return; }
+    if (name === 'Music') { setNotice('Music is unavailable — DROP has no licensed music library yet.'); return; }
+    if (name === 'Donation') { setNotice('Donation is unavailable — DROP has no payments provider yet.'); return; }
+    setNotice('');
     if (name === 'Avatar') { setAvatarPlaced((v) => !v); }
     setStickers((prev) => (prev.includes(name) ? prev.filter((s) => s !== name) : [...prev, name]));
   };
 
   const publish = () => {
-    if (link && !link.startsWith('https://')) { alert('Link stickers must use https://'); return; }
+    if (link && !link.startsWith('https://')) { setNotice('Link stickers must use https://'); return; }
     onPublish({
       filter,
       effect,
+      audience: kind === 'story' ? audience : undefined,
       extras: {
         text: text || undefined, font, textColor, textAlign, textAnimation, textBackground,
         mentionUserId: mention ? Number(mention) || undefined : undefined,
@@ -110,6 +117,14 @@ export default function StoryEditor({
           <button className="primary" onClick={publish}>Publish</button>
         </span>
       </div>
+      {notice && <div className="notice" style={{ marginTop: 8 }}>{notice}</div>}
+      {kind === 'story' && (
+        <div style={{ display: 'flex', gap: 6, marginTop: 10 }}>
+          <span className="muted" style={{ alignSelf: 'center' }}>Share with:</span>
+          <button className={audience === 'everyone' ? 'primary' : 'ghost'} onClick={() => setAudience('everyone')}>Everyone</button>
+          <button className={audience === 'close-friends' ? 'primary' : 'ghost'} onClick={() => setAudience('close-friends')}>Close Friends</button>
+        </div>
+      )}
 
       <div style={{ height: 220, borderRadius: 12, margin: '12px 0', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 56, background: '#111', color: '#fff', filter: `${selectedFilter.css} ${selectedEffect?.css ?? ''}`, textAlign: textAlign }}>
         {text ? <span style={{ color: textColor, fontFamily: font === 'Mono' ? 'monospace' : font === 'Signature' ? 'cursive' : 'sans-serif', background: textBackground === 'solid' ? '#000' : textBackground === 'translucent' ? 'rgba(0,0,0,0.4)' : 'transparent', padding: 8 }}>{text}</span> : '✦'}
@@ -120,8 +135,8 @@ export default function StoryEditor({
         {(['filters', 'text', 'stickers', 'effects', 'draw'] as const).map((t) => (
           <button key={t} className={tab === t ? 'primary' : 'ghost'} onClick={() => setTab(t)}>{t[0].toUpperCase() + t.slice(1)}</button>
         ))}
-        <button className="ghost" onClick={() => alert('Download: your own media can be saved to this device in the full app.')}>Download</button>
-        <button className="ghost" onClick={() => alert('More: Save draft, Discard, Settings.')}>More</button>
+        <button className="ghost" onClick={() => setNotice('Download: your own media can be saved to this device in the full app.')}>Download</button>
+        <button className="ghost" onClick={() => setNotice('More: Save draft, Discard, Settings.')}>More</button>
       </div>
 
       {tab === 'filters' && (

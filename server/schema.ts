@@ -1,4 +1,4 @@
-// DROP database schema — 33 tables. DDL is Postgres-flavoured; the Muse
+// DROP database schema — 40 tables. DDL is Postgres-flavoured; the Muse
 // hosted build uses the same tables. No dummy rows are seeded.
 
 export const TABLES = [
@@ -14,13 +14,24 @@ export const TABLES = [
   // Page 04 — Profile, Privacy & Identity (2026-11-19):
   'privacy_preferences', 'follow_requests', 'mutes',
   'room_identities', 'privacy_audit_events',
+  // Settings (2026-11-19):
+  'close_friends', 'story_hidden_from', 'restricted_accounts',
+  'hidden_words', 'user_settings', 'story_archive', 'message_requests',
 ] as const;
-// 33 tables. Slider ratings are stored in the poll-vote tables
+// 40 tables. Slider ratings are stored in the poll-vote tables
 // (post_poll_votes / story_poll_votes) with a rating value.
 // NOTE: otp_challenges is UNUSED — phone + OTP is disabled (2026-11-19).
 
 export const DDL = `
-CREATE TABLE users (id SERIAL PRIMARY KEY, username TEXT UNIQUE NOT NULL, display_name TEXT NOT NULL, password_hash TEXT, email TEXT UNIQUE, google_sub TEXT UNIQUE, avatar_url TEXT, bio TEXT, is_private BOOLEAN DEFAULT FALSE, auth_method TEXT NOT NULL DEFAULT 'google', cover_url TEXT, links JSONB, location TEXT, birthday DATE, updated_at TIMESTAMPTZ DEFAULT NOW(), created_at TIMESTAMPTZ DEFAULT NOW());
+CREATE TABLE users (id SERIAL PRIMARY KEY, username TEXT UNIQUE NOT NULL, display_name TEXT NOT NULL, password_hash TEXT, email TEXT UNIQUE, google_sub TEXT UNIQUE, avatar_url TEXT, bio TEXT, is_private BOOLEAN DEFAULT FALSE, auth_method TEXT NOT NULL DEFAULT 'google', cover_url TEXT, links JSONB, location TEXT, birthday DATE, last_active_at TIMESTAMPTZ, updated_at TIMESTAMPTZ DEFAULT NOW(), created_at TIMESTAMPTZ DEFAULT NOW());
+CREATE TABLE close_friends (user_id INT NOT NULL REFERENCES users(id), friend_id INT NOT NULL REFERENCES users(id), created_at TIMESTAMPTZ DEFAULT NOW(), PRIMARY KEY (user_id, friend_id));
+CREATE TABLE story_hidden_from (user_id INT NOT NULL REFERENCES users(id), hidden_id INT NOT NULL REFERENCES users(id), created_at TIMESTAMPTZ DEFAULT NOW(), PRIMARY KEY (user_id, hidden_id));
+CREATE TABLE restricted_accounts (restrictor_id INT NOT NULL REFERENCES users(id), restricted_id INT NOT NULL REFERENCES users(id), created_at TIMESTAMPTZ DEFAULT NOW(), PRIMARY KEY (restrictor_id, restricted_id));
+CREATE TABLE hidden_words (user_id INT NOT NULL REFERENCES users(id), word TEXT NOT NULL, created_at TIMESTAMPTZ DEFAULT NOW(), PRIMARY KEY (user_id, word));
+CREATE TABLE user_settings (user_id INT PRIMARY KEY REFERENCES users(id), language TEXT NOT NULL DEFAULT 'en', reduce_motion BOOLEAN NOT NULL DEFAULT FALSE, hide_like_counts BOOLEAN NOT NULL DEFAULT FALSE, sensitive_content_level TEXT NOT NULL DEFAULT 'standard', save_story_to_archive BOOLEAN NOT NULL DEFAULT FALSE, story_replies TEXT NOT NULL DEFAULT 'followers', who_can_comment TEXT NOT NULL DEFAULT 'everyone', gif_comments BOOLEAN NOT NULL DEFAULT TRUE, allow_story_shares BOOLEAN NOT NULL DEFAULT TRUE, account_type TEXT NOT NULL DEFAULT 'personal', ai_generated_label BOOLEAN NOT NULL DEFAULT FALSE, show_account_suggestions BOOLEAN NOT NULL DEFAULT TRUE, gender TEXT, notify_follow BOOLEAN NOT NULL DEFAULT TRUE, notify_follow_request BOOLEAN NOT NULL DEFAULT TRUE, notify_comment BOOLEAN NOT NULL DEFAULT TRUE, notify_mention BOOLEAN NOT NULL DEFAULT TRUE, notify_message BOOLEAN NOT NULL DEFAULT TRUE, notify_slash BOOLEAN NOT NULL DEFAULT TRUE, notify_drop BOOLEAN NOT NULL DEFAULT TRUE, updated_at TIMESTAMPTZ DEFAULT NOW());
+CREATE TABLE story_archive (id SERIAL PRIMARY KEY, user_id INT NOT NULL REFERENCES users(id), media_url TEXT, filter TEXT DEFAULT 'original', effect TEXT DEFAULT 'none', extras_json JSONB, original_created_at TIMESTAMPTZ, archived_at TIMESTAMPTZ DEFAULT NOW());
+CREATE TABLE message_requests (id SERIAL PRIMARY KEY, sender_id INT NOT NULL REFERENCES users(id), recipient_id INT NOT NULL REFERENCES users(id), body TEXT, status TEXT NOT NULL DEFAULT 'pending', conversation_id INT REFERENCES conversations(id), created_at TIMESTAMPTZ DEFAULT NOW(), updated_at TIMESTAMPTZ DEFAULT NOW());
+CREATE UNIQUE INDEX message_requests_pending_unique ON message_requests (sender_id, recipient_id) WHERE status = 'pending';
 CREATE TABLE privacy_preferences (user_id INT PRIMARY KEY REFERENCES users(id), is_private BOOLEAN DEFAULT FALSE, activity_status BOOLEAN DEFAULT TRUE, read_receipts BOOLEAN DEFAULT TRUE, who_can_message TEXT DEFAULT 'everyone', who_can_slash TEXT DEFAULT 'friends', who_can_mention TEXT DEFAULT 'everyone', who_can_tag TEXT DEFAULT 'friends', default_room_identity TEXT DEFAULT 'drop', updated_at TIMESTAMPTZ DEFAULT NOW());
 CREATE TABLE follow_requests (id SERIAL PRIMARY KEY, requester_id INT NOT NULL REFERENCES users(id), target_id INT NOT NULL REFERENCES users(id), status TEXT NOT NULL DEFAULT 'pending', created_at TIMESTAMPTZ DEFAULT NOW(), updated_at TIMESTAMPTZ DEFAULT NOW(), UNIQUE (requester_id, target_id));
 CREATE TABLE mutes (muter_id INT NOT NULL REFERENCES users(id), muted_id INT NOT NULL REFERENCES users(id), scope TEXT NOT NULL DEFAULT 'all', created_at TIMESTAMPTZ DEFAULT NOW(), PRIMARY KEY (muter_id, muted_id));

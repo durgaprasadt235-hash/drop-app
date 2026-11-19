@@ -45,7 +45,17 @@ export function getDatabaseUrl(): string {
   );
 }
 
+// Test seam (2026-11-19 Settings): the tsx handler tests inject a mock
+// sql tag via setTestSql() so authenticated flows can be exercised with
+// no real DB credentials. Only settable in-process by test code; no
+// request can set it, and production never calls it.
+let testSqlOverride: Sql | null = null;
+export function setTestSql(sql: Sql | null): void {
+  testSqlOverride = sql;
+}
+
 export function getSql(): Sql | null {
+  if (testSqlOverride) return testSqlOverride;
   const url = getDatabaseUrl();
   if (!url) return null;
   return neon(url);
