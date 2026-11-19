@@ -1,0 +1,28 @@
+{
+  "dependencies": {
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0"
+  },
+  "description": "DROP — privacy-aware social platform: Stories, Posts, Reels, Drops with Blast, Slash messaging, Clubrooms",
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0",
+    "@vitejs/plugin-react": "^4.3.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0",
+    "vite": "^6.0.0"
+  },
+  "name": "drop-app",
+  "private": true,
+  "scripts": {
+    "build": "tsc -b && vite build",
+    "dev": "vite",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit",
+    "server": "tsx server/index.ts",
+    "build:server": "tsc -p tsconfig.server.json"
+  },
+  "type": "module",
+  "version": "1.0.0"
+}
