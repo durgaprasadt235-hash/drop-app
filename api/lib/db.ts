@@ -16,15 +16,16 @@ import { neon } from '@neondatabase/serverless';
 export type Sql = ReturnType<typeof neon>;
 
 export const OWNER_EMAIL = 'durgaprasadt235@gmail.com';
+export const OWNER_EMAILS = ['durgaprasadt235@gmail.com', 'dpthoorpati@gmail.com'];
 
-/** Admin allow-list: DROP_ADMIN_EMAILS (comma-separated) or the owner. */
+/** Admin allow-list: DROP_ADMIN_EMAILS (comma-separated) or the owners. */
 export function isAdminEmail(email: string | null | undefined): boolean {
   if (!email) return false;
   const list = (process.env.DROP_ADMIN_EMAILS ?? '')
     .split(',')
     .map((e) => e.trim().toLowerCase())
     .filter(Boolean);
-  if (list.length === 0) list.push(OWNER_EMAIL.toLowerCase());
+  if (list.length === 0) list.push(...OWNER_EMAILS.map((e) => e.toLowerCase()));
   return list.includes(email.toLowerCase());
 }
 

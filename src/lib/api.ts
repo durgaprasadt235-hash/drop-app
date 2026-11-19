@@ -76,11 +76,12 @@ export interface Message {
   createdAt: string;
 }
 
-/** Owner of DROP — the only account that may see the Admin / Insights view. */
+/** Owner of DROP — the only accounts that may see the Admin / Insights view. */
 export const OWNER_EMAIL = 'durgaprasadt235@gmail.com';
+export const OWNER_EMAILS = ['durgaprasadt235@gmail.com', 'dpthoorpati@gmail.com'];
 
 export function isOwnerEmail(email: string | null | undefined): boolean {
-  return typeof email === 'string' && email.toLowerCase() === OWNER_EMAIL.toLowerCase();
+  return typeof email === 'string' && OWNER_EMAILS.some((o) => o.toLowerCase() === email.toLowerCase());
 }
 
 export interface AuthStatus {
