@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { Story, User } from '../lib/api';
 import { filterCss } from '../lib/filters';
 import { getPublicProfile, createConversation, sendMessage, listFollowersFollowing } from '../lib/api';
+import { IconClose, IconDrop, IconImage, IconReplay } from './icons';
 
 // 24h Story viewer: 30s per segment, progress + countdown, replay within
 // 24h, hold-to-pause, tap right = next / left = previous, swipe-down close.
@@ -149,11 +150,11 @@ export default function StoryViewer({
         <span>{story.author?.displayName ?? story.author?.username ?? 'Story'} · {story.filter}</span>
         <span style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
           <span style={{ background: 'rgba(255,255,255,0.2)', borderRadius: 999, padding: '2px 8px' }}>{remaining}s</span>
-          <button style={{ background: 'none', border: 'none', color: '#fff', fontSize: 18 }} onClick={(e) => { e.stopPropagation(); onClose(); }}>✕</button>
+          <button style={{ background: 'none', border: 'none', color: '#fff', fontSize: 18 }} onClick={(e) => { e.stopPropagation(); onClose(); }}><IconClose size={18} /></button>
         </span>
       </div>
       <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 72, filter: filterCss(story.filter) }}>
-        {story.mediaUrl ? '🖼️' : '✦'}
+        {story.mediaUrl ? <IconImage size={72} /> : <IconDrop size={72} />}
       </div>
       {paused && <div style={{ textAlign: 'center', padding: 8 }}>Paused — hold to pause, release to resume</div>}
       <div style={{ display: 'flex', justifyContent: 'center', gap: 12, padding: 16, flexWrap: 'wrap' }}>
@@ -161,7 +162,7 @@ export default function StoryViewer({
           style={{ background: 'rgba(255,255,255,0.2)', color: '#fff', border: 'none', borderRadius: 999, padding: '8px 16px' }}
           onClick={(e) => { e.stopPropagation(); setElapsed(0); setReplayed(true); }}
         >
-          ↻ Replay{replayed ? 'ed' : ''}
+          <IconReplay size={16} /> Replay{replayed ? 'ed' : ''}
         </button>
         {!isOwn && allowShares && (
           <button

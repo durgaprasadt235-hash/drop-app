@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { Post, ServerComment } from '../lib/api';
 import { toggleLike, addComment, listComments, voteStoryPoll, getMySettings } from '../lib/api';
 import { filterCss } from '../lib/filters';
+import { IconComment, IconDrop, IconFire, IconImage, IconMore, IconSave, IconSend, IconShare } from './icons';
 
 // Feed post: Fire instead of heart, double-tap Fire, 500ms long-press
 // Comments, creator row with Follow, Poll / Questions / Slider widgets.
@@ -47,7 +48,7 @@ export default function PostCard({ post, onFollow, following }: {
         <span className="avatar">{(post.author?.displayName ?? 'D')[0]}</span>
         <strong style={{ flex: 1 }}>{post.author?.displayName ?? post.author?.username}</strong>
         <button className="ghost" onClick={() => onFollow(post.authorId)}>{following ? 'Following' : 'Follow'}</button>
-        <button className="ghost" aria-label="More">⋯</button>
+        <button className="ghost" aria-label="More"><IconMore size={22} /></button>
       </div>
 
       <div
@@ -58,17 +59,17 @@ export default function PostCard({ post, onFollow, following }: {
         onPointerUp={() => { if (longPress.current) window.clearTimeout(longPress.current); }}
         onPointerLeave={() => { if (longPress.current) window.clearTimeout(longPress.current); }}
       >
-        {post.mediaUrl ? '🖼️' : '✦'}
-        {showFire && <span style={{ position: 'absolute', fontSize: 64 }}>🔥</span>}
+        {post.mediaUrl ? <IconImage size={48} /> : <IconDrop size={48} />}
+        {showFire && <span style={{ position: 'absolute' }}><IconFire size={64} filled /></span>}
         {extras.poll && <div style={{ position: 'absolute', bottom: 8, background: 'rgba(0,0,0,0.6)', color: '#fff', padding: '6px 10px', borderRadius: 8 }}>{extras.poll.question}</div>}
       </div>
 
       <div className="engagement">
-        <button className={fired ? 'fire-on' : ''} onClick={fire} aria-label="Fire">🔥{hideLikeCounts ? '' : ` ${count}`}</button>
-        <button onClick={openComments} aria-label="Comment">💬</button>
-        <button aria-label="Reshare">↗️</button>
-        <button aria-label="Send">➤</button>
-        <button aria-label="Save">🔖</button>
+        <button className={fired ? 'fire-on' : ''} onClick={fire} aria-label="Fire"><IconFire size={22} filled={fired} />{hideLikeCounts ? '' : ` ${count}`}</button>
+        <button onClick={openComments} aria-label="Comment"><IconComment size={22} /></button>
+        <button aria-label="Reshare"><IconShare size={22} /></button>
+        <button aria-label="Send"><IconSend size={22} /></button>
+        <button aria-label="Save"><IconSave size={22} /></button>
       </div>
       <p style={{ minHeight: 48, margin: '8px 0 0' }}>{post.caption}</p>
       {extras.poll && (

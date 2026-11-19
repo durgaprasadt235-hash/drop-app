@@ -72,7 +72,7 @@ function Toggle({ on, onChange, label }: { on: boolean; onChange: (v: boolean) =
       onClick={() => onChange(!on)}
       style={{
         minWidth: 52, minHeight: 32, borderRadius: 999, border: '1px solid var(--border)',
-        background: on ? 'linear-gradient(135deg, var(--accent), var(--accent2))' : 'var(--surface)',
+        background: on ? 'var(--accent)' : 'var(--surface)',
         color: on ? '#fff' : 'inherit', fontWeight: 700, flexShrink: 0,
       }}
     >
@@ -830,7 +830,7 @@ function HelpScreen({ onBack }: { onBack: () => void }) {
       <Card>
         {topics.map((t) => (
           <div key={t.title} style={{ borderBottom: '1px solid var(--border)', padding: '12px 0' }}>
-            <button type="button" onClick={() => setOpen(open === t.title ? null : t.title)} style={{ background: 'none', border: 'none', textAlign: 'left', width: '100%', color: 'inherit', fontSize: 16 }}>
+            <button type="button" onClick={() => setOpen(open === t.title ? null : t.title)} style={{ background: 'none', border: 'none', textAlign: 'left', width: '100%', color: 'inherit', fontSize: 14 }}>
               <strong>{t.title}</strong> {open === t.title ? '▾' : '›'}
             </button>
             {open === t.title && <p className="muted" style={{ margin: '8px 0 0' }}>{t.body}</p>}

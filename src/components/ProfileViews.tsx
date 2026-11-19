@@ -19,6 +19,10 @@ import {
 import type { FollowRequestItem, RoomIdentity, UserSettings } from '../lib/api';
 import PostCard from './PostCard';
 import { filterCss } from '../lib/filters';
+import {
+  IconCheck, IconClose, IconDrop, IconFilm, IconGear, IconGrid, IconLock,
+  IconLocationPin, IconMask, IconPresenceDot, IconProfile, IconSave,
+} from './icons';
 
 function isImageUrl(url: string | null | undefined): url is string {
   return typeof url === 'string' && (/^(https?:\/\/|data:image\/)/.test(url));
@@ -59,7 +63,7 @@ function Toggle({ on, onChange, label }: { on: boolean; onChange: (v: boolean) =
       onClick={() => onChange(!on)}
       style={{
         minWidth: 52, minHeight: 32, borderRadius: 999, border: '1px solid var(--border)',
-        background: on ? 'linear-gradient(135deg, var(--accent), var(--accent2))' : 'var(--surface)',
+        background: on ? 'var(--accent)' : 'var(--surface)',
         color: on ? '#fff' : 'inherit', fontWeight: 700,
       }}
     >
@@ -206,13 +210,13 @@ export function ProfilePage(props: {
           )}
         </div>
         <h2 style={{ margin: '8px 0 0' }}>{profile.displayName}</h2>
-        <p className="muted" style={{ margin: '2px 0' }}>@{profile.username}{profile.isPrivate ? ' · 🔒 Private' : ''}</p>
-        {presence && <p style={{ margin: '2px 0', fontSize: 13 }}>🟢 {presence}</p>}
+        <p className="muted" style={{ margin: '2px 0' }}>@{profile.username}{profile.isPrivate ? <> · <IconLock size={13} /> Private</> : ''}</p>
+        {presence && <p style={{ margin: '2px 0', fontSize: 13 }}><span style={{ color: '#22c55e', display: 'inline-flex' }}><IconPresenceDot size={10} /></span> {presence}</p>}
         {profile.bio ? <p style={{ whiteSpace: 'pre-wrap' }}>{profile.bio}</p> : <p className="muted">No bio yet.</p>}
         {(profile.links ?? []).map((l) => (
           <p key={l.url} style={{ margin: '2px 0' }}><a href={l.url} target="_blank" rel="noreferrer">{l.label}</a></p>
         ))}
-        {profile.location && <p className="muted">📍 {profile.location}</p>}
+        {profile.location && <p className="muted"><IconLocationPin size={14} /> {profile.location}</p>}
         {notice && <div className="notice">{notice}</div>}
 
         {/* Stats — real server counts, tap opens the real list.
@@ -265,7 +269,7 @@ export function ProfilePage(props: {
           </div>
         ) : locked ? (
           <div className="card" style={{ margin: '12px 0', textAlign: 'center' }}>
-            <div style={{ fontSize: 32 }}>🔒</div>
+            <div style={{ display: 'flex', justifyContent: 'center' }}><IconLock size={32} /></div>
             <strong>This account is private</strong>
             <p className="muted">Follow to see their photos, Reels and Drops.</p>
             {rel === 'requested' ? (
@@ -289,7 +293,7 @@ export function ProfilePage(props: {
             >
               Share Profile
             </button>
-            <button className="ghost" onClick={props.onPrivacy}>⚙️ Settings</button>
+            <button className="ghost" onClick={props.onPrivacy}><IconGear size={16} /> Settings</button>
           </div>
         ) : (
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', margin: '12px 0' }}>
@@ -323,10 +327,10 @@ export function ProfilePage(props: {
           <>
             <div className="profile-tabs" role="tablist">
               {([
-                ['posts', '▦', 'Posts'],
-                ['reels', '🎬', 'Reels'],
-                ['drops', '💧', 'Drops'],
-                ...(isOwner ? [['saved', '🔖', 'Saved']] as const : []),
+                ['posts', <IconGrid size={18} />, 'Posts'],
+                ['reels', <IconFilm size={18} />, 'Reels'],
+                ['drops', <IconDrop size={18} />, 'Drops'],
+                ...(isOwner ? [['saved', <IconSave size={18} />, 'Saved']] as const : []),
               ] as const).map(([t, icon, label]) => (
                 <button key={t} role="tab" aria-selected={tab === t} className={tab === t ? 'active' : ''} onClick={() => setTab(t as any)}>
                   {icon} {label}
@@ -346,7 +350,7 @@ export function ProfilePage(props: {
                       {isImageUrl(p.mediaUrl) ? (
                         <img src={p.mediaUrl} alt="" style={{ filter: filterCss(p.filter ?? 'original') }} />
                       ) : (
-                        <span style={{ filter: filterCss(p.filter ?? 'original') }}>{p.caption ? p.caption.slice(0, 60) : '✦'}</span>
+                        <span style={{ filter: filterCss(p.filter ?? 'original') }}>{p.caption ? p.caption.slice(0, 60) : <IconDrop size={24} />}</span>
                       )}
                     </button>
                   ))}
@@ -363,7 +367,7 @@ export function ProfilePage(props: {
                 <div className="profile-grid">
                   {reels.map((r) => (
                     <button key={r.id} type="button" className="profile-tile" onClick={() => setSelectedReel(r)} aria-label="Open Reel">
-                      {isImageUrl(r.mediaUrl) ? <img src={r.mediaUrl} alt="" /> : <span>🎬<br />Reel</span>}
+                      {isImageUrl(r.mediaUrl) ? <img src={r.mediaUrl} alt="" /> : <span><IconFilm size={24} /><br />Reel</span>}
                     </button>
                   ))}
                 </div>
@@ -379,7 +383,7 @@ export function ProfilePage(props: {
                 <div className="profile-grid">
                   {drops.map((d) => (
                     <button key={d.id} type="button" className="profile-tile" onClick={() => setSelectedDrop(d)} aria-label={`Open Drop, ${d.status}`}>
-                      <span>💧<br />{d.status === 'waiting' ? 'Sealed' : d.status === 'ready' ? 'Ready to Blast' : 'Revealed'}</span>
+                      <span><IconDrop size={24} /><br />{d.status === 'waiting' ? 'Sealed' : d.status === 'ready' ? 'Ready to Blast' : 'Revealed'}</span>
                     </button>
                   ))}
                 </div>
@@ -395,7 +399,7 @@ export function ProfilePage(props: {
                       {isImageUrl(p.mediaUrl) ? (
                         <img src={p.mediaUrl} alt="" style={{ filter: filterCss(p.filter ?? 'original') }} />
                       ) : (
-                        <span style={{ filter: filterCss(p.filter ?? 'original') }}>{p.caption ? p.caption.slice(0, 60) : '✦'}</span>
+                        <span style={{ filter: filterCss(p.filter ?? 'original') }}>{p.caption ? p.caption.slice(0, 60) : <IconDrop size={24} />}</span>
                       )}
                     </button>
                   ))}
@@ -408,7 +412,7 @@ export function ProfilePage(props: {
         {selectedPost && (
           <div className="profile-modal" onClick={() => setSelectedPost(null)}>
             <div className="profile-modal-card" onClick={(e) => e.stopPropagation()}>
-              <button className="ghost" onClick={() => setSelectedPost(null)}>✕ Close</button>
+              <button className="ghost" onClick={() => setSelectedPost(null)}><IconClose size={16} /> Close</button>
               <PostCard
                 post={{ ...selectedPost, author: { id: profile.id, username: profile.username, displayName: profile.displayName, avatarUrl: profile.avatarUrl ?? null } }}
                 following={rel === 'following'}
@@ -425,9 +429,9 @@ export function ProfilePage(props: {
         {selectedReel && (
           <div className="profile-modal" onClick={() => setSelectedReel(null)}>
             <div className="profile-modal-card" onClick={(e) => e.stopPropagation()}>
-              <button className="ghost" onClick={() => setSelectedReel(null)}>✕ Close</button>
+              <button className="ghost" onClick={() => setSelectedReel(null)}><IconClose size={16} /> Close</button>
               <div style={{ textAlign: 'center', padding: 24 }}>
-                <div style={{ fontSize: 48 }}>🎬</div>
+                <div style={{ display: 'flex', justifyContent: 'center' }}><IconFilm size={48} /></div>
                 <p>Reel by {profile.displayName}</p>
                 <p className="muted">{new Date(selectedReel.createdAt).toLocaleString()}</p>
                 {isImageUrl(selectedReel.mediaUrl) && <img src={selectedReel.mediaUrl} alt="" style={{ maxWidth: '100%', borderRadius: 12 }} />}
@@ -440,9 +444,9 @@ export function ProfilePage(props: {
         {selectedDrop && (
           <div className="profile-modal" onClick={() => setSelectedDrop(null)}>
             <div className="profile-modal-card" onClick={(e) => e.stopPropagation()}>
-              <button className="ghost" onClick={() => setSelectedDrop(null)}>✕ Close</button>
+              <button className="ghost" onClick={() => setSelectedDrop(null)}><IconClose size={16} /> Close</button>
               <div style={{ textAlign: 'center', padding: 16 }}>
-                <div style={{ fontSize: 48 }}>💧</div>
+                <div style={{ display: 'flex', justifyContent: 'center' }}><IconDrop size={48} /></div>
                 <p><strong>{selectedDrop.kind === 'protected' ? 'Protected' : 'Public'} Drop</strong> — {selectedDrop.status === 'waiting' ? 'Sealed' : selectedDrop.status === 'ready' ? 'Ready to Blast' : 'Revealed'}</p>
                 <p className="muted">Blasts {new Date(selectedDrop.blastAt).toLocaleString()}</p>
                 {selectedDrop.status === 'waiting' && selectedDrop.creatorId !== me.id ? (
@@ -635,15 +639,15 @@ export function PrivacyPage({ me, onBack, onSignOut }: { me: User; onBack: () =>
             <h3>Account Privacy</h3>
             <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span>🔒 Profile Visibility — {prefs.isPrivate ? 'Private' : 'Public'}<br /><span className="muted">{prefs.isPrivate ? 'Only approved followers see your content.' : 'Anyone can see your profile, posts and Drops.'}</span></span>
+                <span><IconLock size={16} /> Profile Visibility — {prefs.isPrivate ? 'Private' : 'Public'}<br /><span className="muted">{prefs.isPrivate ? 'Only approved followers see your content.' : 'Anyone can see your profile, posts and Drops.'}</span></span>
                 <Toggle label="Profile visibility" on={prefs.isPrivate} onChange={(v) => void change({ ...prefs, isPrivate: v })} />
               </div>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span>🟢 Activity Status — show when you&apos;re active</span>
+                <span><span style={{ color: '#22c55e', display: 'inline-flex' }}><IconPresenceDot size={10} /></span> Activity Status — show when you&apos;re active</span>
                 <Toggle label="Activity status" on={prefs.activityStatus} onChange={(v) => void change({ ...prefs, activityStatus: v })} />
               </div>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span>✓✓ Read Receipts — let others know when you&apos;ve read messages</span>
+                <span><IconCheck size={16} /> Read Receipts — let others know when you&apos;ve read messages</span>
                 <Toggle label="Read receipts" on={prefs.readReceipts} onChange={(v) => void change({ ...prefs, readReceipts: v })} />
               </div>
             </div>
@@ -749,10 +753,10 @@ export function RoomIdentityPage({ me, clubroomId, clubroomName, onBack }: { me:
       {saved && <p className="muted">Saved — you are in the room as {mode === 'room' ? alias : me.displayName}.</p>}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
         <button className={mode === 'drop' ? 'primary' : 'ghost'} onClick={() => setMode('drop')} style={{ textAlign: 'left' }}>
-          👤 Use My DROP Profile<br /><span style={{ fontWeight: 400 }}>Join rooms with your main profile (visible name, photo and identity).</span>
+          <IconProfile size={18} /> Use My DROP Profile<br /><span style={{ fontWeight: 400 }}>Join rooms with your main profile (visible name, photo and identity).</span>
         </button>
         <button className={mode === 'room' ? 'primary' : 'ghost'} onClick={() => setMode('room')} style={{ textAlign: 'left' }}>
-          🎭 Join with a Room Identity<br /><span style={{ fontWeight: 400 }}>Use a unique name and photo for specific rooms (your DROP profile stays hidden).</span>
+          <IconMask size={18} /> Join with a Room Identity<br /><span style={{ fontWeight: 400 }}>Use a unique name and photo for specific rooms (your DROP profile stays hidden).</span>
         </button>
         {mode === 'room' && (
           <label>Room Identity (Alias)<input value={alias} onChange={(e) => setAlias(e.target.value)} placeholder="e.g. TravelExplorer" /></label>
@@ -766,7 +770,7 @@ export function RoomIdentityPage({ me, clubroomId, clubroomName, onBack }: { me:
           <h3>Members (as they appear in this room)</h3>
           {members.length === 0 && <p className="muted">No members yet.</p>}
           {members.map((m, i) => (
-            <p key={i}>{m.identityMode === 'room' ? '🎭 ' : '👤 '}{m.displayName}{m.username ? ` (@${m.username})` : ''}</p>
+            <p key={i}>{m.identityMode === 'room' ? <IconMask size={14} /> : <IconProfile size={14} />} {m.displayName}{m.username ? ` (@${m.username})` : ''}</p>
           ))}
         </div>
       </div>

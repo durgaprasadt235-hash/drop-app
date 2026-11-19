@@ -22,16 +22,19 @@ import PostCard from './components/PostCard';
 import DropHub from './components/DropHub';
 import MessagesView from './components/MessagesView';
 import { ReelsView, ClubroomsView, SearchView, NotificationsView, SavedView } from './components/OtherViews';
+import { IconBell, IconPlus, IconHome, IconReels, IconDrop, IconSearch, IconProfile, IconMessages } from './components/icons';
+import type { IconProps } from './components/icons';
+import type { ComponentType } from 'react';
 
 type View = 'home' | 'discover' | 'hub' | 'search' | 'profile' | 'messages' | 'clubrooms' | 'notifications' | 'saved' | 'admin' | 'edit-profile' | 'privacy' | 'room-identity' | 'settings';
 
-const NAV: { id: View; label: string; icon: string }[] = [
-  { id: 'home', label: 'Home', icon: '🏠' },
-  { id: 'discover', label: 'Discover', icon: '🎬' },
-  { id: 'hub', label: 'DROP Hub', icon: '💧' },
-  { id: 'search', label: 'Search', icon: '🔍' },
-  { id: 'profile', label: 'Profile', icon: '👤' },
-  { id: 'messages', label: 'Messages', icon: '💬' },
+const NAV: { id: View; label: string; Icon: ComponentType<IconProps> }[] = [
+  { id: 'home', label: 'Home', Icon: IconHome },
+  { id: 'discover', label: 'Discover', Icon: IconReels },
+  { id: 'hub', label: 'DROP Hub', Icon: IconDrop },
+  { id: 'search', label: 'Search', Icon: IconSearch },
+  { id: 'profile', label: 'Profile', Icon: IconProfile },
+  { id: 'messages', label: 'Messages', Icon: IconMessages },
 ];
 
 export default function App() {
@@ -44,6 +47,7 @@ export default function App() {
   const [users, setUsers] = useState<User[]>([]);
   const [conversations, setConversations] = useState<{ id: number; memberIds: number[] }[]>([]);
   const [unread, setUnread] = useState(0);
+  const [unreadMessages, setUnreadMessages] = useState(0);
   const [shortcut, setShortcut] = useState<'my' | 'scheduled' | 'active' | 'trending'>('my');
   const [following, setFollowing] = useState<Set<number>>(new Set());
   const [viewerIndex, setViewerIndex] = useState<number | null>(null);
@@ -74,18 +78,26 @@ export default function App() {
   const googleBtnRef = useRef<HTMLDivElement | null>(null);
   const linkGoogleBtnRef = useRef<HTMLDivElement | null>(null);
 
-  // AssistiveTouch dock
-  const [ball, setBall] = useState<{ x: number; y: number }>(() => {
-    try {
-      const raw = localStorage.getItem('drop-dock-pos');
-      if (raw) { const p = JSON.parse(raw) as { x: number; y: number }; return p; }
-    } catch { /* default */ }
-    return { x: 0.85, y: 0.75 };
+  // Approved dock — fixed capsule on mobile/tablet, slim left rail on
+  // desktop (≥1025px). The old floating-ball form is gone entirely:
+  // no drag-anywhere ball, no position key, no idle auto-collapse.
+  // The capsule side persists in localStorage ('left' | 'right').
+  const [dockSide, setDockSide] = useState<'left' | 'right'>(() => {
+    try { return localStorage.getItem('drop-dock-side') === 'left' ? 'left' : 'right'; } catch { return 'right'; }
   });
-  const [panelOpen, setPanelOpen] = useState(false);
-  const [panelSide, setPanelSide] = useState<'left' | 'right'>('right');
-  const dragRef = useRef<{ dx: number; dy: number; moved: boolean } | null>(null);
-  const idleTimer = useRef<number | null>(null);
+  const [isDesktop, setIsDesktop] = useState(() => window.matchMedia('(min-width: 1025px)').matches);
+  const [magnified, setMagnified] = useState<number | null>(null);
+  const [hovered, setHovered] = useState<number | null>(null);
+  const pressRef = useRef<{ index: number; startX: number; startY: number; longPressed: boolean; dragging: boolean } | null>(null);
+  const longPressTimer = useRef<number | null>(null);
+  const clickGuard = useRef(false);
+
+  useEffect(() => {
+    const mq = window.matchMedia('(min-width: 1025px)');
+    const onChange = () => setIsDesktop(mq.matches);
+    mq.addEventListener('change', onChange);
+    return () => mq.removeEventListener('change', onChange);
+  }, []);
 
   useEffect(() => {
     document.body.classList.toggle('dark', dark);
@@ -98,7 +110,7 @@ export default function App() {
     setDrops(await listDrops());
     setUsers(await listUsers());
     try { setConversations(await listConversations()); } catch { setConversations([]); }
-    try { setUnread((await getUnreadCounts()).notifications); } catch { setUnread(0); }
+    try { const counts = await getUnreadCounts(); setUnread(counts.notifications); setUnreadMessages(counts.messages); } catch { setUnread(0); setUnreadMessages(0); }
   }, []);
 
   useEffect(() => {
@@ -236,48 +248,102 @@ export default function App() {
     return subscribeToUpdates(() => { void refresh(); });
   }, [me, refresh]);
 
-  // 30s idle auto-collapse
-  useEffect(() => {
-    if (!panelOpen) return;
-    const reset = () => {
-      if (idleTimer.current) window.clearTimeout(idleTimer.current);
-      idleTimer.current = window.setTimeout(() => setPanelOpen(false), 30000);
-    };
-    reset();
-    window.addEventListener('pointerdown', reset);
-    return () => {
-      window.removeEventListener('pointerdown', reset);
-      if (idleTimer.current) window.clearTimeout(idleTimer.current);
-    };
-  }, [panelOpen]);
+  // Dock gesture machine (approved spec): plain tap navigates immediately;
+  // a 300ms long-press magnifies the selected icon (1.25x, neighbours
+  // 1.12x) and shows its label, and release navigates; a horizontal drag
+  // of >=14px relocates the capsule, snapping to the nearest edge.
+  // Reduce-motion (Settings → Accessibility) disables the magnification.
+  const reduceMotion = () => document.body.classList.contains('reduce-motion');
 
-  const openPanel = () => {
-    setPanelSide(ball.x < 0.5 ? 'left' : 'right');
-    setPanelOpen(true);
+  const navigateDock = (id: View) => {
+    if (id === 'profile') setViewedUsername(null);
+    setView(id);
   };
 
-  const onBallPointerDown = (e: React.PointerEvent) => {
-    dragRef.current = { dx: e.clientX - ball.x * window.innerWidth, dy: e.clientY - ball.y * window.innerHeight, moved: false };
-    (e.target as HTMLElement).setPointerCapture(e.pointerId);
+  const clearLongPress = () => {
+    if (longPressTimer.current) { window.clearTimeout(longPressTimer.current); longPressTimer.current = null; }
+    setMagnified(null);
   };
-  const onBallPointerMove = (e: React.PointerEvent) => {
-    const d = dragRef.current;
-    if (!d) return;
-    const nx = (e.clientX - d.dx) / window.innerWidth;
-    const ny = (e.clientY - d.dy) / window.innerHeight;
-    if (Math.abs(nx - ball.x) > 0.01 || Math.abs(ny - ball.y) > 0.01) d.moved = true;
-    const pos = { x: Math.min(0.92, Math.max(0.02, nx)), y: Math.min(0.9, Math.max(0.05, ny)) };
-    setBall(pos);
-    localStorage.setItem('drop-dock-pos', JSON.stringify(pos));
+
+  const onDockPointerDown = (index: number) => (e: React.PointerEvent<HTMLButtonElement>) => {
+    if (e.pointerType === 'mouse' && e.button !== 0) return;
+    pressRef.current = { index, startX: e.clientX, startY: e.clientY, longPressed: false, dragging: false };
+    e.currentTarget.setPointerCapture(e.pointerId);
+    longPressTimer.current = window.setTimeout(() => {
+      if (pressRef.current) { pressRef.current.longPressed = true; setMagnified(index); }
+    }, 300);
   };
-  const onBallPointerUp = () => {
-    const moved = dragRef.current?.moved;
-    dragRef.current = null;
-    if (!moved) {
-      if (panelOpen) setPanelOpen(false);
-      else openPanel();
+
+  const onDockPointerMove = (e: React.PointerEvent<HTMLButtonElement>) => {
+    const p = pressRef.current;
+    if (!p || p.dragging) return;
+    const dx = e.clientX - p.startX;
+    const dy = e.clientY - p.startY;
+    if (Math.abs(dx) >= 14 && Math.abs(dx) >= Math.abs(dy)) {
+      p.dragging = true;
+      clearLongPress();
     }
   };
+
+  const onDockPointerUp = (index: number) => (e: React.PointerEvent<HTMLButtonElement>) => {
+    const p = pressRef.current;
+    pressRef.current = null;
+    clearLongPress();
+    if (!p) return;
+    if (p.dragging) {
+      const side = e.clientX < window.innerWidth / 2 ? 'left' : 'right';
+      setDockSide(side);
+      try { localStorage.setItem('drop-dock-side', side); } catch { /* ignore */ }
+      return;
+    }
+    // Tap navigates immediately; a completed long-press navigates on release.
+    clickGuard.current = true;
+    navigateDock(NAV[index].id);
+  };
+
+  const onDockPointerCancel = () => {
+    pressRef.current = null;
+    clearLongPress();
+  };
+
+  const onDockClick = (index: number) => () => {
+    // Pointer navigation already ran in pointerup; this covers keyboard activation.
+    if (clickGuard.current) { clickGuard.current = false; return; }
+    navigateDock(NAV[index].id);
+  };
+
+  const iconScale = (index: number): React.CSSProperties => {
+    const base: React.CSSProperties = { display: 'inline-flex' };
+    if (magnified === null || reduceMotion()) return base;
+    const d = Math.abs(index - magnified);
+    if (d === 0) return { ...base, transform: 'scale(1.25)', transition: 'transform 150ms ease' };
+    if (d === 1) return { ...base, transform: 'scale(1.12)', transition: 'transform 150ms ease' };
+    return base;
+  };
+
+  const renderDockButtons = (alwaysShowLabel: boolean) => NAV.map((n, i) => (
+    <button
+      key={n.id}
+      type="button"
+      className={view === n.id ? 'active' : ''}
+      aria-label={n.label}
+      aria-current={view === n.id ? 'page' : undefined}
+      onPointerDown={onDockPointerDown(i)}
+      onPointerMove={onDockPointerMove}
+      onPointerUp={onDockPointerUp(i)}
+      onPointerCancel={onDockPointerCancel}
+      onClick={onDockClick(i)}
+      onContextMenu={(e) => e.preventDefault()}
+      onMouseEnter={() => setHovered(i)}
+      onMouseLeave={() => setHovered((h) => (h === i ? null : h))}
+    >
+      <span className="dock-icon" style={iconScale(i)}>
+        <n.Icon size={22} filled={view === n.id} />
+      </span>
+      {n.id === 'messages' && unreadMessages > 0 && <span className="dock-badge" aria-hidden="true" />}
+      {(alwaysShowLabel || magnified === i || hovered === i) && <span className="dock-label">{n.label}</span>}
+    </button>
+  ));
 
   const doAuth = async () => {
     setAuthError('');
@@ -341,14 +407,14 @@ export default function App() {
         <div className="logo" onClick={() => setView('home')}>D<span>R</span>OP</div>
         <span style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
           <button className="ghost" onClick={() => setDark((d) => !d)}>{dark ? 'White' : 'Dark'}</button>
-          <button className="ghost" onClick={() => setView('notifications')} aria-label="Notifications">🔔{unread > 0 ? ` ${unread}` : ''}</button>
+          <button className="ghost" onClick={() => setView('notifications')} aria-label="Notifications"><IconBell size={22} />{unread > 0 ? ` ${unread}` : ''}</button>
         </span>
       </header>
 
       {view === 'home' && (
         <>
           <div className="stories">
-            <button className="story-circle yours" onClick={() => setEditing('story')}>＋</button>
+            <button className="story-circle yours" onClick={() => setEditing('story')}><IconPlus size={28} /></button>
             {stories.map((s, i) => (
               <button key={s.id} className="story-circle" onClick={() => setViewerIndex(i)}>{(s.author?.displayName ?? 'S')[0]}</button>
             ))}
@@ -400,12 +466,12 @@ export default function App() {
           ) : adminData && !adminData.dbConfigured ? (
             <>
               <p className="muted">Shared database not configured — counts are this device only.</p>
-              <p style={{ fontSize: 36, fontWeight: 700, margin: '8px 0' }}>{getLocalUserCount()} <span style={{ fontSize: 16 }}>users on this device (local only)</span></p>
+              <p className="stat-number" style={{ margin: '8px 0' }}>{getLocalUserCount()} <span style={{ fontSize: 16 }}>users on this device (local only)</span></p>
               <p className="muted">Set DATABASE_URL in Vercel (see README → "Shared user tracking") and redeploy, then every Google sign-in is counted centrally here.</p>
             </>
           ) : adminData ? (
             <>
-              <p style={{ fontSize: 36, fontWeight: 700, margin: '8px 0' }}>{adminData.totalUsers} <span style={{ fontSize: 16 }}>total users</span></p>
+              <p className="stat-number" style={{ margin: '8px 0' }}>{adminData.totalUsers} <span style={{ fontSize: 16 }}>total users</span></p>
               <h3>Sign-ups by day</h3>
               {adminData.signupsByDay.length === 0 && <p className="muted">No sign-ups yet.</p>}
               {adminData.signupsByDay.map((d) => (
@@ -511,23 +577,18 @@ export default function App() {
         <StoryViewer stories={stories} index={viewerIndex} onClose={() => setViewerIndex(null)} onIndex={setViewerIndex} me={me} />
       )}
 
-      {!panelOpen && (
-        <div
-          className="dock-ball" role="button" aria-label="Navigation"
-          style={{ left: `${ball.x * 100}vw`, top: `${ball.y * 100}vh` }}
-          onPointerDown={onBallPointerDown}
-          onPointerMove={onBallPointerMove}
-          onPointerUp={onBallPointerUp}
-        >
-          💧{unread > 0 ? <span style={{ position: 'absolute', top: -4, right: -4, background: '#ef4444', color: '#fff', borderRadius: 999, fontSize: 11, padding: '2px 6px' }}>{unread}</span> : null}
+      {/* Approved dock — global on every signed-in page. Fixed capsule
+          below desktop widths; slim left rail at ≥1025px (no floating
+          element over content on desktop). Full-screen Story/Blast
+          viewers (z-index 100) still cover the dock by design. */}
+      {!isDesktop ? (
+        <div className={dockSide === 'left' ? 'dock-panel dock-left' : 'dock-panel'} style={dockSide === 'left' ? { left: 12, right: 'auto' } : undefined}>
+          {renderDockButtons(false)}
         </div>
-      )}
-      {panelOpen && (
-        <div className="dock-panel" style={{ [panelSide]: 12, top: '50%', transform: 'translateY(-50%)' } as React.CSSProperties}>
-          {NAV.map((n) => (
-            <button key={n.id} className={view === n.id ? 'active' : ''} aria-label={n.label} onClick={() => { if (n.id === 'profile') setViewedUsername(null); setView(n.id); setPanelOpen(false); }}>{n.icon}</button>
-          ))}
-        </div>
+      ) : (
+        <nav className="dock-rail" aria-label="Navigation">
+          {renderDockButtons(true)}
+        </nav>
       )}
     </div>
   );

@@ -1,102 +1,273 @@
+/* DROP — clean classic luxury theme (Workstream A)
+   Type: Inter, no serif anywhere. One restrained accent (DROP rose) for
+   Fire / active states only; primary actions are ink-black. No gradients. */
+
 :root {
+  /* Restrained palette — light theme (default) */
+  --ink: #0b1327;
+  --paper: #ffffff;
+  --secondary: #5b6472;
+  --hairline: #e7e8eb;
+  --surface: #f7f7f8;
+  --accent: #d92d5e; /* DROP rose — Fire / active states only */
+  --fire: #d92d5e;
+  /* --accent2 is kept as an alias of the rose so the two inline
+     linear-gradient() toggle backgrounds still in .tsx files render
+     flat rose (accent -> accent) instead of pink -> purple. It must
+     never be used to build a gradient in CSS. */
+  --accent2: #d92d5e;
+
+  /* Legacy variable names used by components — all point at the new palette */
   --bg: #ffffff;
   --text: #0b1327;
-  --muted: #6b7280;
-  --border: #e5e7eb;
-  --accent: #ec4899;
-  --accent2: #8b5cf6;
-  --fire: #f97316;
-  --surface: #f9fafb;
+  --muted: #5b6472;
+  --border: #e7e8eb;
+
+  /* Dark theme tokens (structure unchanged) */
   --dark-bg: #0b1327;
   --dark-text: #ffffff;
   --dark-muted: #a8b3c9;
   --dark-border: #1f2a44;
+
+  /* Spacing scale — 4px base */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
 }
 
 * { box-sizing: border-box; }
 
 html, body, #root { margin: 0; padding: 0; min-height: 100%; }
 
+/* ---------- Type scale (no browser defaults left) ---------- */
 body {
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-size: 15px;
+  line-height: 22px;
+  font-weight: 400;
   background: var(--bg);
   color: var(--text);
   -webkit-font-smoothing: antialiased;
 }
 
-body.dark { background: var(--dark-bg); color: var(--dark-text); }
-body.dark .card, body.dark .pill-bar, body.dark .header { background: var(--dark-bg); color: var(--dark-text); border-color: var(--dark-border); }
-body.dark .muted { color: var(--dark-muted); }
-body.dark input, body.dark textarea { background: #131e38; color: #fff; border-color: var(--dark-border); }
+p { font-size: 15px; line-height: 22px; font-weight: 400; margin: 0 0 var(--space-3); }
 
-button { font: inherit; cursor: pointer; }
-input, textarea { font: inherit; padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; width: 100%; }
-button.primary { background: linear-gradient(135deg, var(--accent), var(--accent2)); color: #fff; border: none; border-radius: 999px; padding: 12px 20px; font-weight: 600; }
-button.ghost { background: transparent; border: 1px solid var(--border); border-radius: 999px; padding: 8px 14px; }
+/* Display / wordmark */
+h1, .logo {
+  font-size: 24px;
+  line-height: 28px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  margin: 0 0 var(--space-2);
+}
 
-.app { max-width: 480px; margin: 0 auto; min-height: 100vh; position: relative; overflow-x: clip; }
-.header { display: flex; align-items: center; justify-content: space-between; height: 56px; padding: 0 12px; border-bottom: 1px solid var(--border); position: sticky; top: 0; background: var(--bg); z-index: 10; }
-.logo { font-size: 22px; font-weight: 800; letter-spacing: 1px; }
-.logo span { color: var(--accent); }
-.muted { color: var(--muted); font-size: 13px; }
-.stories { display: flex; gap: 12px; overflow-x: auto; padding: 12px; scrollbar-width: none; }
+/* Screen title */
+h2 {
+  font-size: 20px;
+  line-height: 26px;
+  font-weight: 650;
+  margin: 0 0 var(--space-2);
+}
+
+/* Section heading */
+h3 {
+  font-size: 14px;
+  line-height: 20px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  margin: var(--space-4) 0 var(--space-2);
+}
+
+/* Secondary / meta text */
+.muted { color: var(--muted); font-size: 13px; line-height: 18px; font-weight: 400; }
+
+/* Caption */
+.caption { color: var(--muted); font-size: 12px; line-height: 16px; font-weight: 400; }
+
+/* Stat number */
+.stat-number { font-size: 17px; line-height: 22px; font-weight: 650; }
+
+/* Buttons / labels */
+button {
+  font-family: inherit;
+  font-size: 14px;
+  line-height: 20px;
+  font-weight: 600;
+  cursor: pointer;
+  min-height: 44px;
+  transition: background-color 150ms ease, color 150ms ease, border-color 150ms ease, opacity 200ms ease;
+}
+input, textarea {
+  font-family: inherit;
+  font-size: 15px;
+  line-height: 22px;
+  font-weight: 400;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  width: 100%;
+}
+button.primary { background: var(--ink); color: #fff; border: none; border-radius: 10px; padding: 12px 20px; }
+button.ghost { background: transparent; border: 1px solid var(--border); border-radius: 10px; padding: 8px 14px; color: inherit; }
+
+/* ---------- Layout — mobile-first, single column ---------- */
+.app { width: 100%; max-width: 100%; margin: 0 auto; min-height: 100vh; position: relative; overflow-x: clip; }
+.header { display: flex; align-items: center; justify-content: space-between; height: 56px; padding: 0 16px; border-bottom: 1px solid var(--border); position: sticky; top: 0; background: var(--bg); z-index: 10; }
+.logo { margin: 0; cursor: pointer; }
+.logo span { color: inherit; }
+.stories { display: flex; gap: 12px; overflow-x: auto; padding: 12px 16px; scrollbar-width: none; }
 .stories::-webkit-scrollbar { display: none; }
 .story-circle { flex: 0 0 auto; width: 72px; height: 72px; border-radius: 50%; border: 3px solid var(--accent); display: flex; align-items: center; justify-content: center; font-size: 24px; background: var(--surface); }
 .story-circle.yours { border-style: dashed; }
 .pill-bar { display: flex; height: 64px; border: 1px solid var(--border); border-radius: 32px; margin: 8px 16px; overflow: hidden; }
-.pill-bar button { flex: 1; border: none; background: transparent; font-weight: 600; }
+.pill-bar button { flex: 1; border: none; background: transparent; }
 .pill-bar button.active { background: var(--surface); color: var(--accent); }
-.card { border-bottom: 1px solid var(--border); padding: 12px; }
-.avatar { width: 40px; height: 40px; border-radius: 50%; background: linear-gradient(135deg, var(--accent), var(--accent2)); color: #fff; display: inline-flex; align-items: center; justify-content: center; font-weight: 700; }
+.card { border-bottom: 1px solid var(--border); border-radius: 12px; padding: 16px; }
+.avatar { width: 40px; height: 40px; border-radius: 50%; background: var(--ink); color: #fff; display: inline-flex; align-items: center; justify-content: center; font-weight: 700; }
 .post-media { width: 100%; aspect-ratio: 4 / 3; border-radius: 12px; display: flex; align-items: center; justify-content: center; font-size: 48px; background: var(--surface); margin: 10px 0; }
 .engagement { display: flex; gap: 16px; font-size: 20px; align-items: center; }
 .engagement button { background: none; border: none; font-size: 20px; }
 .fire-on { color: var(--fire); }
 
-/* AssistiveTouch ball + panel */
-.dock-ball {
-  position: fixed; z-index: 50; width: 56px; height: 56px; border-radius: 50%;
-  background: rgba(255, 255, 255, 0.55); backdrop-filter: blur(12px);
-  border: 1px solid rgba(255, 255, 255, 0.7); box-shadow: 0 4px 20px rgba(0, 0, 0, 0.25);
-  display: flex; align-items: center; justify-content: center; font-size: 24px;
-  touch-action: none; user-select: none; cursor: grab;
-}
-body.dark .dock-ball { background: rgba(11, 19, 39, 0.55); }
+/* ---------- Dock — fixed capsule (no ball, no blur glass) ---------- */
 .dock-panel {
-  position: fixed; z-index: 50; width: 56px; height: 296px; border-radius: 28px;
-  background: rgba(255, 255, 255, 0.75); backdrop-filter: blur(16px);
-  border: 1px solid rgba(255, 255, 255, 0.7); box-shadow: 0 8px 30px rgba(0, 0, 0, 0.25);
+  position: fixed; z-index: 50; width: 56px; height: 296px;
+  right: 12px; bottom: calc(20px + env(safe-area-inset-bottom, 0px));
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.96);
+  border: 1px solid var(--hairline);
+  box-shadow: 0 8px 24px rgba(11, 19, 39, 0.12);
   display: flex; flex-direction: column; align-items: center; justify-content: space-evenly;
 }
-body.dark .dock-panel { background: rgba(11, 19, 39, 0.8); }
-.dock-panel button { background: none; border: none; font-size: 22px; min-width: 44px; min-height: 44px; }
-.dock-panel button.active { transform: scale(1.25); }
+.dock-panel button { position: relative; background: none; border: none; min-width: 44px; min-height: 44px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; padding: 0; }
+.dock-panel button.active { transform: none; }
+.dock-panel button.active::after {
+  content: ''; position: absolute; bottom: 2px; left: 50%;
+  width: 4px; height: 4px; margin-left: -2px; border-radius: 50%;
+  background: var(--accent);
+}
+.dock-icon { width: 22px; height: 22px; color: var(--ink); }
+.dock-panel button.active .dock-icon { color: var(--ink); }
+.dock-badge {
+  position: absolute; top: 6px; right: 6px; width: 8px; height: 8px;
+  border-radius: 50%; background: var(--accent); border: 2px solid var(--paper);
+}
+.dock-label { font-size: 10px; line-height: 12px; font-weight: 600; color: var(--muted); text-align: center; }
+/* Panel label sits BESIDE its icon (outside the capsule), not beneath
+   it: to the left when the capsule is docked right, to the right when
+   docked left. The desktop rail keeps its beneath-icon label. */
+.dock-panel .dock-label {
+  position: absolute; top: 50%; right: calc(100% + 10px); transform: translateY(-50%);
+  white-space: nowrap; background: var(--paper); border: 1px solid var(--hairline);
+  border-radius: 999px; padding: 4px 8px; box-shadow: 0 4px 12px rgba(11, 19, 39, 0.12); z-index: 60;
+}
+.dock-panel.dock-left .dock-label { right: auto; left: calc(100% + 10px); }
+.dock-rail { display: none; }
 
 /* Page 04 — Profile */
-.profile-cover { width: 100%; height: 170px; background: linear-gradient(135deg, var(--accent), var(--accent2)); display: flex; align-items: center; justify-content: center; color: #fff; overflow: hidden; }
+.profile-cover { width: 100%; height: 170px; background: var(--surface); display: flex; align-items: center; justify-content: center; color: var(--muted); overflow: hidden; }
 .profile-cover img { width: 100%; height: 100%; object-fit: cover; }
 .profile-avatar-wrap { display: flex; align-items: flex-end; gap: 12px; margin-top: -44px; position: relative; z-index: 1; }
 .profile-avatar-wrap .avatar { border: 4px solid var(--bg); }
 body.dark .profile-avatar-wrap .avatar { border-color: var(--dark-bg); }
-.profile-stats { display: flex; margin: 12px 0; }
+.profile-stats { display: flex; margin: 16px 0; }
 .profile-stats button { flex: 1; background: none; border: none; display: flex; flex-direction: column; align-items: center; gap: 2px; color: inherit; min-height: 44px; }
-.profile-stats button strong { font-size: 18px; }
-.profile-stats button span { font-size: 13px; color: var(--muted); }
-.profile-tabs { display: flex; border-bottom: 1px solid var(--border); margin: 8px 0; }
-.profile-tabs button { flex: 1; background: none; border: none; padding: 12px 4px; font-weight: 600; color: var(--muted); border-bottom: 2px solid transparent; }
+.profile-stats button strong { font-size: 17px; line-height: 22px; font-weight: 650; }
+.profile-stats button span { font-size: 13px; line-height: 18px; color: var(--muted); }
+.profile-tabs { display: flex; border-bottom: 1px solid var(--border); margin: 24px 0 0; }
+.profile-tabs button { flex: 1; background: none; border: none; padding: 12px 4px; color: var(--muted); border-bottom: 2px solid transparent; }
 .profile-tabs button.active { color: var(--accent); border-bottom-color: var(--accent); }
 /* Instagram-style 3-column profile grid — every tile is a real record. */
 .profile-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 2px; margin: 8px 0; }
-.profile-tile { aspect-ratio: 1; border: none; padding: 0; overflow: hidden; background: linear-gradient(135deg, var(--accent), var(--accent2)); color: #fff; font-size: 13px; font-weight: 600; display: flex; align-items: center; justify-content: center; text-align: center; cursor: pointer; }
+.profile-tile { aspect-ratio: 1; border: none; padding: 0; overflow: hidden; background: var(--surface); color: var(--text); font-size: 13px; line-height: 18px; font-weight: 600; display: flex; align-items: center; justify-content: center; text-align: center; cursor: pointer; }
 .profile-tile img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .profile-tile span { padding: 6px; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; }
 /* Profile detail viewer (post / Reel / Drop) */
 .profile-modal { position: fixed; inset: 0; z-index: 60; background: rgba(0, 0, 0, 0.6); display: flex; align-items: flex-end; justify-content: center; }
-.profile-modal-card { background: var(--bg); color: var(--text); width: 100%; max-width: 480px; max-height: 88vh; overflow-y: auto; border-radius: 16px 16px 0 0; padding: 12px; }
+.profile-modal-card { background: var(--bg); color: var(--text); width: 100%; max-width: 680px; max-height: 88vh; overflow-y: auto; border-radius: 16px 16px 0 0; padding: 16px; }
 body.dark .profile-modal-card { background: var(--dark-bg); color: var(--dark-text); }
 /* Followers / Following sheet rows */
 .profile-user-row { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--border); }
 .profile-user-row .who { flex: 1; min-width: 0; }
+
+.signin { padding: 24px 16px; display: flex; flex-direction: column; gap: 12px; }
+.notice { background: #fef3c7; border: 1px solid #f59e0b; border-radius: 10px; padding: 10px 12px; font-size: 13px; line-height: 18px; }
+body.dark .notice { background: #3a2f10; }
+.filter-strip { display: flex; gap: 8px; overflow-x: auto; padding: 8px 16px; scrollbar-width: none; }
+.filter-strip::-webkit-scrollbar { display: none; }
+.filter-strip button { flex: 0 0 auto; border: 1px solid var(--border); background: var(--surface); border-radius: 10px; padding: 8px 12px; }
+.filter-strip button.active { border-color: var(--accent); color: var(--accent); }
+
+/* ---------- Dark theme (structure unchanged) ---------- */
+body.dark { background: var(--dark-bg); color: var(--dark-text); }
+body.dark .card, body.dark .pill-bar, body.dark .header { background: var(--dark-bg); color: var(--dark-text); border-color: var(--dark-border); }
+body.dark .muted { color: var(--dark-muted); }
+body.dark h3 { color: var(--dark-muted); }
+body.dark .dock-label { color: var(--dark-muted); }
+body.dark .dock-panel .dock-label { background: var(--dark-bg); border-color: var(--dark-border); }
+body.dark input, body.dark textarea { background: #131e38; color: #fff; border-color: var(--dark-border); }
+body.dark button.primary { background: #ffffff; color: var(--ink); }
+body.dark .avatar { background: #ffffff; color: var(--ink); border: 1px solid var(--dark-border); }
+body.dark .profile-cover, body.dark .profile-tile { background: #131e38; color: var(--dark-text); }
+body.dark .pill-bar button.active { background: #131e38; }
+body.dark .filter-strip button { background: #131e38; }
+body.dark .dock-panel { background: rgba(11, 19, 39, 0.96); border-color: var(--dark-border); }
+body.dark .dock-icon { color: var(--dark-text); }
+body.dark .dock-panel button.active .dock-icon { color: var(--dark-text); }
+body.dark .dock-badge { border-color: var(--dark-bg); }
+body.dark .dock-rail { background: var(--dark-bg); border-right-color: var(--dark-border); }
+
+/* ---------- Responsive breakpoints ---------- */
+/* Phone (<=640px): single 100% column, 16px gutters, header 56px.
+   Smaller display / title / section / stat sizes at this width. */
+@media (max-width: 640px) {
+  h1, .logo { font-size: 20px; line-height: 24px; }
+  h2 { font-size: 18px; line-height: 24px; }
+  h3 { font-size: 13px; line-height: 18px; }
+  .stat-number, .profile-stats button strong { font-size: 16px; line-height: 20px; }
+}
+
+/* Tablet (641–1024px): content column max-width 600px centred, 24px gutters. */
+@media (min-width: 641px) {
+  .app { max-width: 600px; }
+  .header { padding: 0 24px; }
+  .stories { padding: 12px 24px; }
+  .card { padding: 16px 24px; }
+  .pill-bar { margin: 8px 24px; }
+  .signin { padding: 24px; }
+  .filter-strip { padding: 8px 24px; }
+  .profile-modal-card { padding: 24px; }
+}
+
+/* Desktop (>=1025px): content column max-width 680px centred, header spans
+   the content column, 56px. One type scale at all widths — the column
+   widens, the text does not grow. Slim left icon rail appears. */
+@media (min-width: 1025px) {
+  .app { max-width: 680px; }
+  .dock-rail {
+    display: flex; position: fixed; left: 0; top: 0; bottom: 0; z-index: 40;
+    width: 72px; flex-direction: column; align-items: center;
+    padding: 16px 0; gap: 8px;
+    background: var(--paper); border-right: 1px solid var(--hairline);
+  }
+  .dock-rail button { position: relative; background: none; border: none; min-width: 44px; min-height: 44px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; padding: 0; }
+  .dock-rail button.active { transform: none; }
+  .dock-rail button.active::after {
+    content: ''; position: absolute; bottom: 2px; left: 50%;
+    width: 4px; height: 4px; margin-left: -2px; border-radius: 50%;
+    background: var(--accent);
+  }
+  .dock-rail .dock-label { opacity: 0; transition: opacity 150ms ease; }
+  .dock-rail button:hover .dock-label, .dock-rail button:focus-visible .dock-label { opacity: 1; }
+  .dock-rail button.active .dock-icon { color: var(--ink); }
+}
 
 /* Reduce motion (Settings → Accessibility): disables animations and
    transitions app-wide — editor animations, Blast animation, dock
@@ -105,11 +276,5 @@ body.reduce-motion *, body.reduce-motion *::before, body.reduce-motion *::after 
   animation: none !important;
   transition: none !important;
 }
-
-.signin { padding: 24px 16px; display: flex; flex-direction: column; gap: 12px; }
-.notice { background: #fef3c7; border: 1px solid #f59e0b; border-radius: 10px; padding: 10px 12px; font-size: 13px; }
-body.dark .notice { background: #3a2f10; }
-.filter-strip { display: flex; gap: 8px; overflow-x: auto; padding: 8px 12px; scrollbar-width: none; }
-.filter-strip::-webkit-scrollbar { display: none; }
-.filter-strip button { flex: 0 0 auto; border: 1px solid var(--border); background: var(--surface); border-radius: 999px; padding: 8px 12px; }
-.filter-strip button.active { border-color: var(--accent); color: var(--accent); }
+body.reduce-motion .dock-panel button.active,
+body.reduce-motion .dock-rail button.active { transform: none; }

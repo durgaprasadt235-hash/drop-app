@@ -6,6 +6,7 @@ import {
   followUser, blockUser, reportUser,
 } from '../lib/api';
 import type { Post } from '../lib/api';
+import { IconFilm, IconPresenceDot } from './icons';
 
 export function ReelsView() {
   const [reels, setReels] = useState<{ id: number; mediaUrl: string; author?: User }[]>([]);
@@ -17,7 +18,7 @@ export function ReelsView() {
       <h2>Reels</h2>
       <button className="primary" onClick={async () => { await createReel('reel-media'); setReels(await listReels()); }}>+ New Reel</button>
       {reels.length === 0 && <p className="muted">No Reels yet — create one.</p>}
-      {reels.map((r) => <div key={r.id} className="card">🎬 Reel by {r.author?.displayName ?? 'you'}</div>)}
+      {reels.map((r) => <div key={r.id} className="card"><IconFilm size={18} /> Reel by {r.author?.displayName ?? 'you'}</div>)}
     </div>
   );
 }
@@ -89,7 +90,7 @@ export function NotificationsView() {
           key={n.id} className="card" style={{ display: 'block', width: '100%', textAlign: 'left', background: 'none', border: 'none', borderBottom: '1px solid var(--border)', cursor: 'pointer' }}
           onClick={async () => { if (!n.read) { await markNotificationsRead(n.id); setNotes(await listServerNotifications()); } }}
         >
-          {n.read ? '' : '● '}{n.type}: {n.body}
+          {n.read ? '' : <><IconPresenceDot size={8} /> </>}{n.type}: {n.body}
         </button>
       ))}
     </div>

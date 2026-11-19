@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import type { Drop } from '../lib/api';
 import { createDrop, openDrop } from '../lib/api';
+import { IconDrop, IconFire, IconLock } from './icons';
 
 // DROP Hub: Waiting / Ready to Open, Blast presets 1h / 6h / 24h / 3d / 7d,
 // sealed Drops (no caption or media before reveal), Blast animation on
@@ -59,9 +60,9 @@ export default function DropHub({ drops, onRefresh }: { drops: Drop[]; onRefresh
       {shown.map((d) => (
         <div key={d.id} className="card">
           {d.status === 'waiting' ? (
-            <p>🔒 Sealed — blasts {new Date(d.blastAt).toLocaleString()}<br /><span className="muted">Caption and media are hidden until reveal.</span></p>
+            <p><IconLock size={16} /> Sealed — blasts {new Date(d.blastAt).toLocaleString()}<br /><span className="muted">Caption and media are hidden until reveal.</span></p>
           ) : (
-            <p>{blasting === d.id ? '💥 BLAST!' : `✦ ${d.caption ?? 'Drop'} — ${d.kind}`}</p>
+            <p>{blasting === d.id ? <><IconFire size={18} filled /> BLAST!</> : <><IconDrop size={16} /> {d.caption ?? 'Drop'} — {d.kind}</>}</p>
           )}
           {d.status !== 'waiting' && <button className="primary" onClick={() => open(d)}>Open Drop</button>}
         </div>
