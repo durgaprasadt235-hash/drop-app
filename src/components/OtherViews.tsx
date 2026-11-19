@@ -22,7 +22,7 @@ export function ReelsView() {
   );
 }
 
-export function ClubroomsView({ me }: { me: User }) {
+export function ClubroomsView({ me, onJoinIdentity }: { me: User; onJoinIdentity?: (room: { id: number; name: string }) => void }) {
   const [rooms, setRooms] = useState<{ id: number; name: string; memberIds: number[] }[]>([]);
   const [name, setName] = useState('');
   const [loaded, setLoaded] = useState(false);
@@ -38,6 +38,9 @@ export function ClubroomsView({ me }: { me: User }) {
         <div key={r.id} className="card">
           {r.name} — {r.memberIds.length} member(s)
           <button className="ghost" style={{ marginLeft: 8 }} onClick={async () => { await joinClubroom(r.id); setRooms(await listClubrooms()); }}>Join</button>
+          {onJoinIdentity && (
+            <button className="ghost" style={{ marginLeft: 4 }} onClick={() => onJoinIdentity({ id: r.id, name: r.name })}>Join with identity</button>
+          )}
           <span className="muted"> {r.memberIds.includes(me.id) ? '· you are in' : ''}</span>
         </div>
       ))}
@@ -45,7 +48,7 @@ export function ClubroomsView({ me }: { me: User }) {
   );
 }
 
-export function SearchView({ users }: { users: User[] }) {
+export function SearchView({ users, onOpenProfile }: { users: User[]; onOpenProfile?: (username: string) => void }) {
   const [q, setQ] = useState('');
   const [results, setResults] = useState<{ users: User[]; posts: Post[] }>({ users: [], posts: [] });
   return (
@@ -55,6 +58,7 @@ export function SearchView({ users }: { users: User[] }) {
       {results.users.map((u) => (
         <div key={u.id} className="card">
           <span className="avatar">{u.displayName[0]}</span> {u.displayName} (@{u.username})
+          {onOpenProfile && <button className="ghost" style={{ marginLeft: 8 }} onClick={() => onOpenProfile(u.username)}>View profile</button>}
           <button className="ghost" style={{ marginLeft: 8 }} onClick={() => followUser(u.id)}>Follow</button>
           <button className="ghost" style={{ marginLeft: 4 }} onClick={() => blockUser(u.id)}>Block</button>
           <button className="ghost" style={{ marginLeft: 4 }} onClick={() => reportUser(u.id, 'Inappropriate content')}>Report</button>

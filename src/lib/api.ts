@@ -23,6 +23,60 @@ export interface User {
   /** Google account id (sub) this profile is linked to, if any. */
   googleSub?: string | null;
   email?: string | null;
+  coverUrl?: string | null;
+  links?: { label: string; url: string }[];
+  location?: string | null;
+  birthday?: string | null;
+  createdAt?: string;
+}
+
+/** Privacy preferences — persisted server-side (privacy_preferences). */
+export interface PrivacyPrefs {
+  isPrivate: boolean;
+  activityStatus: boolean;
+  readReceipts: boolean;
+  whoCanMessage: 'everyone' | 'friends' | 'nobody';
+  whoCanSlash: 'everyone' | 'friends' | 'nobody';
+  whoCanMention: 'everyone' | 'friends' | 'nobody';
+  whoCanTag: 'everyone' | 'friends' | 'nobody';
+  defaultRoomIdentity: 'drop' | 'room';
+}
+
+export const DEFAULT_PRIVACY: PrivacyPrefs = {
+  isPrivate: false, activityStatus: true, readReceipts: true,
+  whoCanMessage: 'everyone', whoCanSlash: 'friends',
+  whoCanMention: 'everyone', whoCanTag: 'friends', defaultRoomIdentity: 'drop',
+};
+
+export interface FollowRequestItem {
+  id: number;
+  userId: number;
+  username: string;
+  displayName: string;
+  avatarUrl?: string | null;
+  createdAt: string;
+}
+
+export interface RoomIdentity {
+  mode: 'drop' | 'room';
+  alias?: string | null;
+  avatarUrl?: string | null;
+}
+
+export interface PublicProfile {
+  id: number;
+  username: string;
+  displayName: string;
+  avatarUrl?: string | null;
+  isPrivate: boolean;
+  relationship: 'none' | 'following' | 'requested' | 'self';
+  bio?: string;
+  coverUrl?: string | null;
+  links?: { label: string; url: string }[];
+  location?: string | null;
+  birthday?: string | null;
+  counts?: { posts: number; followers: number; following: number };
+  createdAt?: string;
 }
 
 export interface Post {
@@ -115,6 +169,11 @@ interface Store {
   notifications: { id: number; userId: number; type: string; body: string; read: boolean; createdAt: string }[];
   clubrooms: { id: number; name: string; memberIds: number[] }[];
   reels: { id: number; authorId: number; mediaUrl: string; createdAt: string }[];
+  privacy: Record<number, PrivacyPrefs>;
+  followRequests: { id: number; requesterId: number; targetId: number; status: string; createdAt: string }[];
+  blocks: { blockerId: number; blockedId: number }[];
+  mutes: { muterId: number; mutedId: number }[];
+  roomIdentities: { userId: number; clubroomId: number; mode: 'drop' | 'room'; alias?: string | null; avatarUrl?: string | null }[];
   seq: number;
 }
 
@@ -122,7 +181,9 @@ function emptyStore(): Store {
   return {
     users: [], posts: [], stories: [], drops: [], conversations: [],
     messages: [], follows: [], likes: [], saves: [], comments: [],
-    notifications: [], clubrooms: [], reels: [], seq: 1,
+    notifications: [], clubrooms: [], reels: [],
+    privacy: {}, followRequests: [], blocks: [], mutes: [], roomIdentities: [],
+    seq: 1,
   };
 }
 
@@ -185,6 +246,7 @@ export async function getAuthStatus(): Promise<AuthStatus> {
   } catch {
     // No serverless function reachable — rely on the build-time ID.
   }
+  dbOn = dbConfigured;
   return { googleConfigured: serverConfigured || viteClientId.length > 0, dbConfigured, phoneConfigured: false };
 }
 
@@ -377,6 +439,243 @@ export async function getAdminUsers(): Promise<AdminUsersData> {
 // unavailable: users who signed up with a password and forget it must
 // sign in with Google (if linked) — see the note on the sign-in screen.
 
+// ------------------------------------------- profile / privacy (server) ---
+/** Is the shared DB configured (from the last getAuthStatus call)? */
+let dbOn = false;
+export function setDbConfigured(v: boolean): void { dbOn = v; }
+
+async function serverFetch(path: string, init?: RequestInit): Promise<any> {
+  const token = getCurrentSessionToken();
+  const res = await fetch(path, {
+    ...init,
+    headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}), ...(init?.headers ?? {}) },
+  });
+  const data = (await res.json().catch(() => ({}))) as any;
+  if (!res.ok) throw new Error(data.error ?? `Request failed (${res.status}).`);
+  return data;
+}
+
+function toPrivacy(server: any): PrivacyPrefs {
+  return {
+    isPrivate: Boolean(server.is_private),
+    activityStatus: server.activity_status !== false,
+    readReceipts: server.read_receipts !== false,
+    whoCanMessage: server.who_can_message ?? 'everyone',
+    whoCanSlash: server.who_can_slash ?? 'friends',
+    whoCanMention: server.who_can_mention ?? 'everyone',
+    whoCanTag: server.who_can_tag ?? 'friends',
+    defaultRoomIdentity: server.default_room_identity === 'room' ? 'room' : 'drop',
+  };
+}
+
+function fromPrivacy(p: PrivacyPrefs): Record<string, unknown> {
+  return {
+    is_private: p.isPrivate, activity_status: p.activityStatus, read_receipts: p.readReceipts,
+    who_can_message: p.whoCanMessage, who_can_slash: p.whoCanSlash,
+    who_can_mention: p.whoCanMention, who_can_tag: p.whoCanTag,
+    default_room_identity: p.defaultRoomIdentity,
+  };
+}
+
+export async function getMyPrivacy(): Promise<PrivacyPrefs> {
+  const me = requireUser();
+  if (dbOn) {
+    try {
+      const data = await serverFetch('/api/profile/me/privacy');
+      const p = toPrivacy(data.privacy);
+      store.privacy[me.id] = p;
+      saveStore(store);
+      return p;
+    } catch { /* fall through to local */ }
+  }
+  return store.privacy[me.id] ?? { ...DEFAULT_PRIVACY, isPrivate: Boolean(me.isPrivate) };
+}
+
+export async function updateMyPrivacy(p: PrivacyPrefs): Promise<PrivacyPrefs> {
+  const me = requireUser();
+  if (dbOn) {
+    const data = await serverFetch('/api/profile/me/privacy', { method: 'PATCH', body: JSON.stringify(fromPrivacy(p)) });
+    const next = toPrivacy(data.privacy);
+    store.privacy[me.id] = next;
+    me.isPrivate = next.isPrivate;
+    saveStore(store);
+    return next;
+  }
+  store.privacy[me.id] = p;
+  me.isPrivate = p.isPrivate;
+  saveStore(store);
+  return p;
+}
+
+export async function getMyProfileServer(): Promise<PublicProfile | null> {
+  if (!dbOn) return null;
+  try {
+    const data = await serverFetch('/api/profile/me');
+    const p = data.profile;
+    return {
+      id: p.id, username: p.username, displayName: p.displayName,
+      avatarUrl: p.avatarUrl ?? null, coverUrl: p.coverUrl ?? null,
+      bio: p.bio ?? '', links: p.links ?? [], location: p.location ?? null,
+      birthday: p.birthday ?? null, isPrivate: Boolean(p.isPrivate),
+      relationship: 'self', counts: data.counts, createdAt: p.createdAt,
+    };
+  } catch { return null; }
+}
+
+export async function getPublicProfile(username: string): Promise<PublicProfile> {
+  if (dbOn) {
+    try {
+      const data = await serverFetch(`/api/profile/${encodeURIComponent(username)}`);
+      const p = data.profile;
+      return {
+        id: p.id, username: p.username, displayName: p.displayName,
+        avatarUrl: p.avatarUrl ?? null, coverUrl: p.coverUrl ?? null,
+        bio: p.bio ?? '', links: p.links ?? [], location: p.location ?? null,
+        birthday: p.birthday ?? null, isPrivate: Boolean(p.isPrivate),
+        relationship: p.relationship ?? 'none', counts: p.counts, createdAt: p.createdAt,
+      };
+    } catch (err) { throw err; }
+  }
+  const u = store.users.find((x) => x.username.toLowerCase() === username.toLowerCase());
+  if (!u) throw new Error('Profile not found.');
+  const me = currentUserId ? userById(currentUserId) : undefined;
+  return {
+    id: u.id, username: u.username, displayName: u.displayName,
+    avatarUrl: u.avatarUrl ?? null, coverUrl: u.coverUrl ?? null,
+    bio: u.bio ?? '', links: u.links ?? [], location: u.location ?? null,
+    birthday: u.birthday ?? null, isPrivate: Boolean(u.isPrivate),
+    relationship: me?.id === u.id ? 'self'
+      : store.follows.some((f) => f.followerId === me?.id && f.followingId === u.id) ? 'following'
+      : store.followRequests.some((r) => r.requesterId === me?.id && r.targetId === u.id && r.status === 'pending') ? 'requested' : 'none',
+    counts: {
+      posts: store.posts.filter((p) => p.authorId === u.id).length,
+      followers: store.follows.filter((f) => f.followingId === u.id).length,
+      following: store.follows.filter((f) => f.followerId === u.id).length,
+    },
+  };
+}
+
+/** Upload avatar/cover. Returns the public URL, or throws an honest error when storage is not configured. */
+export async function uploadProfilePhoto(kind: 'avatar' | 'cover', file: File): Promise<string> {
+  const me = requireUser();
+  if (!/^image\/(jpeg|png|webp)$/.test(file.type)) throw new Error('Only JPEG, PNG or WebP photos are allowed.');
+  if (file.size > 2 * 1024 * 1024) throw new Error('Photo must be under 2 MB.');
+  const dataUrl = await new Promise<string>((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve(String(r.result));
+    r.onerror = () => reject(new Error('Could not read the photo.'));
+    r.readAsDataURL(file);
+  });
+  if (dbOn) {
+    const data = await serverFetch('/api/profile/upload', {
+      method: 'POST',
+      body: JSON.stringify({ kind, dataUrl, mime: file.type }),
+    });
+    if (kind === 'avatar') me.avatarUrl = data.url; else me.coverUrl = data.url;
+    saveStore(store);
+    return data.url as string;
+  }
+  throw new Error('Photo upload needs storage configured (BLOB_READ_WRITE_TOKEN). Your Google photo or initials avatar is used instead.');
+}
+
+export async function listFollowRequests(): Promise<{ incoming: FollowRequestItem[]; outgoing: FollowRequestItem[] }> {
+  const me = requireUser();
+  if (dbOn) {
+    try {
+      const data = await serverFetch('/api/profile/me/follow-requests');
+      return {
+        incoming: (data.incoming ?? []).map((r: any) => ({ id: r.id, userId: r.userId, username: r.username, displayName: r.displayName, avatarUrl: r.avatarUrl ?? null, createdAt: r.createdAt })),
+        outgoing: (data.outgoing ?? []).map((r: any) => ({ id: r.id, userId: r.userId, username: r.username, displayName: r.displayName, avatarUrl: r.avatarUrl ?? null, createdAt: r.createdAt })),
+      };
+    } catch { /* fall through to local */ }
+  }
+  return {
+    incoming: store.followRequests.filter((r) => r.targetId === me.id && r.status === 'pending').map((r) => {
+      const u = userById(r.requesterId);
+      return { id: r.id, userId: r.requesterId, username: u?.username ?? '', displayName: u?.displayName ?? '', avatarUrl: u?.avatarUrl ?? null, createdAt: r.createdAt };
+    }),
+    outgoing: store.followRequests.filter((r) => r.requesterId === me.id && r.status === 'pending').map((r) => {
+      const u = userById(r.targetId);
+      return { id: r.id, userId: r.targetId, username: u?.username ?? '', displayName: u?.displayName ?? '', avatarUrl: u?.avatarUrl ?? null, createdAt: r.createdAt };
+    }),
+  };
+}
+
+export async function listBlockedMuted(): Promise<{ blocked: User[]; muted: User[] }> {
+  const me = requireUser();
+  if (dbOn) {
+    try {
+      const data = await serverFetch('/api/profile/me/blocks');
+      return {
+        blocked: (data.blocked ?? []).map((u: any) => ({ id: u.id, username: u.username, displayName: u.displayName, avatarUrl: u.avatarUrl ?? null })),
+        muted: (data.muted ?? []).map((u: any) => ({ id: u.id, username: u.username, displayName: u.displayName, avatarUrl: u.avatarUrl ?? null })),
+      };
+    } catch { /* fall through to local */ }
+  }
+  return {
+    blocked: store.blocks.filter((b) => b.blockerId === me.id).map((b) => userById(b.blockedId)).filter((u): u is User => !!u),
+    muted: store.mutes.filter((m) => m.muterId === me.id).map((m) => userById(m.mutedId)).filter((u): u is User => !!u),
+  };
+}
+
+export async function listFollowersFollowing(userId: number, kind: 'followers' | 'following'): Promise<User[]> {
+  if (dbOn) {
+    try {
+      const data = await serverFetch(`/api/profile/lists?targetId=${userId}&kind=${kind}`);
+      return (data.users ?? []).map((u: any) => ({ id: u.id, username: u.username, displayName: u.displayName, avatarUrl: u.avatarUrl ?? null }));
+    } catch (err) { throw err; }
+  }
+  return kind === 'followers' ? listFollowers(userId) : listFollowing(userId);
+}
+
+export async function getRoomIdentity(clubroomId: number): Promise<{ myIdentity: RoomIdentity | null; members: { identityMode: string; displayName: string; username?: string; avatarUrl?: string | null }[]; member: boolean }> {
+  const me = requireUser();
+  if (dbOn) {
+    try {
+      const data = await serverFetch(`/api/clubrooms/${clubroomId}/identity`);
+      return { myIdentity: data.myIdentity, members: data.members ?? [], member: Boolean(data.member) };
+    } catch { /* fall through to local */ }
+  }
+  const mine = store.roomIdentities.find((r) => r.userId === me.id && r.clubroomId === clubroomId);
+  const room = store.clubrooms.find((r) => r.id === clubroomId);
+  const members = (room?.memberIds ?? []).map((id) => {
+    const u = userById(id);
+    const ri = store.roomIdentities.find((r) => r.userId === id && r.clubroomId === clubroomId);
+    if (ri?.mode === 'room') return { identityMode: 'room', displayName: ri.alias ?? 'Room member', avatarUrl: ri.avatarUrl ?? null };
+    return { identityMode: 'drop', displayName: u?.displayName ?? '', username: u?.username, avatarUrl: u?.avatarUrl ?? null };
+  });
+  return { myIdentity: mine ? { mode: mine.mode, alias: mine.alias ?? null, avatarUrl: mine.avatarUrl ?? null } : null, members, member: Boolean(room?.memberIds.includes(me.id)) };
+}
+
+export async function joinClubroomWithIdentity(clubroomId: number, identity: RoomIdentity): Promise<void> {
+  const me = requireUser();
+  if (dbOn) {
+    await serverFetch(`/api/clubrooms/${clubroomId}/identity`, {
+      method: 'POST',
+      body: JSON.stringify({ identityMode: identity.mode, alias: identity.alias ?? undefined, avatarUrl: identity.avatarUrl ?? undefined }),
+    });
+  }
+  await joinClubroom(clubroomId);
+  const existing = store.roomIdentities.find((r) => r.userId === me.id && r.clubroomId === clubroomId);
+  if (existing) { existing.mode = identity.mode; existing.alias = identity.alias ?? null; existing.avatarUrl = identity.avatarUrl ?? null; }
+  else store.roomIdentities.push({ userId: me.id, clubroomId, mode: identity.mode, alias: identity.alias ?? null, avatarUrl: identity.avatarUrl ?? null });
+  saveStore(store);
+}
+
+export async function updateRoomIdentity(clubroomId: number, identity: RoomIdentity): Promise<void> {
+  const me = requireUser();
+  if (dbOn) {
+    await serverFetch(`/api/clubrooms/${clubroomId}/identity`, {
+      method: 'PATCH',
+      body: JSON.stringify({ identityMode: identity.mode, alias: identity.alias ?? undefined, avatarUrl: identity.avatarUrl ?? undefined }),
+    });
+  }
+  const existing = store.roomIdentities.find((r) => r.userId === me.id && r.clubroomId === clubroomId);
+  if (existing) { existing.mode = identity.mode; existing.alias = identity.alias ?? null; existing.avatarUrl = identity.avatarUrl ?? null; }
+  else store.roomIdentities.push({ userId: me.id, clubroomId, mode: identity.mode, alias: identity.alias ?? null, avatarUrl: identity.avatarUrl ?? null });
+  saveStore(store);
+}
+
 export async function getSessionUser(): Promise<User | null> {
   return currentUserId ? (userById(currentUserId) ?? null) : null;
 }
@@ -408,6 +707,38 @@ export async function linkGoogle(idToken: string): Promise<User> {
 }
 
 export async function updateProfile(args: Partial<User> & { id: number }): Promise<User> {
+  const me = requireUser();
+  if (args.id !== me.id) throw new Error('You can only edit your own profile.');
+  // Client-side validation mirrors the server (which re-validates).
+  if (args.username !== undefined) {
+    if (!/^[a-zA-Z0-9_]{3,30}$/.test(args.username.trim())) throw new Error('Username must be 3–30 letters, numbers or underscores.');
+    const clash = store.users.find((x) => x.username.toLowerCase() === args.username!.toLowerCase() && x.id !== me.id);
+    if (clash) throw new Error('That username is already taken.');
+  }
+  if (args.bio !== undefined && args.bio.length > 150) throw new Error('Bio must be 150 characters or fewer.');
+  if (args.links !== undefined) {
+    if (args.links.length > 5) throw new Error('At most 5 links.');
+    for (const l of args.links) {
+      if (!/^https:\/\//.test(l.url)) throw new Error('Links must start with https://');
+    }
+  }
+  if (dbOn) {
+    const data = await serverFetch('/api/profile/me', {
+      method: 'PATCH',
+      body: JSON.stringify({
+        display_name: args.displayName, username: args.username, bio: args.bio,
+        links: args.links, location: args.location, birthday: args.birthday,
+      }),
+    });
+    const p = data.profile;
+    Object.assign(me, {
+      displayName: p.displayName, username: p.username, bio: p.bio,
+      avatarUrl: p.avatarUrl ?? me.avatarUrl, coverUrl: p.coverUrl ?? me.coverUrl,
+      links: p.links ?? [], location: p.location ?? null, birthday: p.birthday ?? null,
+    });
+    saveStore(store);
+    return me;
+  }
   const u = userById(args.id);
   if (!u) throw new Error('Profile not found.');
   Object.assign(u, args);
@@ -440,19 +771,53 @@ function issueSession(userId: number): Session {
 }
 
 // ------------------------------------------------------------- follows ---
-export async function followUser(followingId: number): Promise<void> {
+/** Follow a user. Returns 'following' (public) or 'requested' (private). */
+export async function followUser(followingId: number): Promise<'following' | 'requested'> {
   const me = requireUser();
+  if (followingId === me.id) throw new Error('You cannot follow yourself.');
+  if (dbOn) {
+    const data = await serverFetch('/api/profile/follow', {
+      method: 'POST',
+      body: JSON.stringify({ targetId: followingId }),
+    });
+    const status = data.status === 'requested' ? 'requested' : 'following';
+    if (status === 'following' && !store.follows.some((f) => f.followerId === me.id && f.followingId === followingId)) {
+      store.follows.push({ followerId: me.id, followingId });
+    }
+    if (status === 'requested' && !store.followRequests.some((r) => r.requesterId === me.id && r.targetId === followingId && r.status === 'pending')) {
+      store.followRequests.push({ id: nextId(), requesterId: me.id, targetId: followingId, status: 'pending', createdAt: nowIso() });
+    }
+    saveStore(store);
+    return status;
+  }
+  const target = userById(followingId);
+  if (target?.isPrivate) {
+    if (!store.followRequests.some((r) => r.requesterId === me.id && r.targetId === followingId && r.status === 'pending')) {
+      store.followRequests.push({ id: nextId(), requesterId: me.id, targetId: followingId, status: 'pending', createdAt: nowIso() });
+      saveStore(store);
+    }
+    return 'requested';
+  }
   if (!store.follows.some((f) => f.followerId === me.id && f.followingId === followingId)) {
     store.follows.push({ followerId: me.id, followingId });
     saveStore(store);
   }
+  return 'following';
 }
 
 export async function unfollowUser(followingId: number): Promise<void> {
   const me = requireUser();
+  if (dbOn) {
+    try {
+      await serverFetch(`/api/profile/follow?targetId=${followingId}`, { method: 'DELETE' });
+    } catch { /* fall through to local */ }
+  }
   store.follows = store.follows.filter(
     (f) => !(f.followerId === me.id && f.followingId === followingId),
   );
+  store.followRequests.forEach((r) => {
+    if (r.requesterId === me.id && r.targetId === followingId && r.status === 'pending') r.status = 'cancelled';
+  });
   saveStore(store);
 }
 
@@ -470,20 +835,89 @@ export async function requestFollow(userId: number): Promise<void> {
   await followUser(userId);
 }
 
-export async function respondFollowRequest(_followerId: number, _accept: boolean): Promise<void> {
-  // Private-account follow requests are approved server-side in the Muse build.
+export async function respondFollowRequest(requestId: number, accept: boolean): Promise<void> {
+  const me = requireUser();
+  if (dbOn) {
+    await serverFetch(`/api/profile/follow-requests/${requestId}`, {
+      method: 'POST',
+      body: JSON.stringify({ accept }),
+    });
+  }
+  const r = store.followRequests.find((x) => x.id === requestId && x.targetId === me.id);
+  if (r) {
+    r.status = accept ? 'accepted' : 'declined';
+    if (accept && !store.follows.some((f) => f.followerId === r.requesterId && f.followingId === me.id)) {
+      store.follows.push({ followerId: r.requesterId, followingId: me.id });
+    }
+  }
+  saveStore(store);
+}
+
+/** Legacy signature kept for callers passing a follower id. */
+export async function respondFollowRequestByFollower(followerId: number, accept: boolean): Promise<void> {
+  const me = requireUser();
+  const r = store.followRequests.find((x) => x.requesterId === followerId && x.targetId === me.id && x.status === 'pending');
+  if (!r) throw new Error('Follow request not found.');
+  await respondFollowRequest(r.id, accept);
 }
 
 export async function blockUser(userId: number): Promise<void> {
   const me = requireUser();
+  if (dbOn) {
+    await serverFetch('/api/profile/block', { method: 'POST', body: JSON.stringify({ targetId: userId }) });
+  }
   store.follows = store.follows.filter(
     (f) => !((f.followerId === me.id && f.followingId === userId) || (f.followerId === userId && f.followingId === me.id)),
   );
+  store.followRequests.forEach((r) => {
+    if (((r.requesterId === me.id && r.targetId === userId) || (r.requesterId === userId && r.targetId === me.id)) && r.status === 'pending') r.status = 'cancelled';
+  });
+  if (!store.blocks.some((b) => b.blockerId === me.id && b.blockedId === userId)) {
+    store.blocks.push({ blockerId: me.id, blockedId: userId });
+  }
   saveStore(store);
 }
 
-export async function unblockUser(_userId: number): Promise<void> {
-  // Unblock is a no-op in the standalone; blocking only removes follows.
+export async function unblockUser(userId: number): Promise<void> {
+  const me = requireUser();
+  if (dbOn) {
+    try {
+      await serverFetch(`/api/profile/block?targetId=${userId}`, { method: 'DELETE' });
+    } catch { /* fall through to local */ }
+  }
+  store.blocks = store.blocks.filter((b) => !(b.blockerId === me.id && b.blockedId === userId));
+  saveStore(store);
+}
+
+export async function muteUser(userId: number): Promise<void> {
+  const me = requireUser();
+  if (dbOn) {
+    await serverFetch('/api/profile/mute', { method: 'POST', body: JSON.stringify({ targetId: userId }) });
+  }
+  if (!store.mutes.some((m) => m.muterId === me.id && m.mutedId === userId)) {
+    store.mutes.push({ muterId: me.id, mutedId: userId });
+  }
+  saveStore(store);
+}
+
+export async function unmuteUser(userId: number): Promise<void> {
+  const me = requireUser();
+  if (dbOn) {
+    try {
+      await serverFetch(`/api/profile/mute?targetId=${userId}`, { method: 'DELETE' });
+    } catch { /* fall through to local */ }
+  }
+  store.mutes = store.mutes.filter((m) => !(m.muterId === me.id && m.mutedId === userId));
+  saveStore(store);
+}
+
+export function isBlockedLocal(a: number, b: number): boolean {
+  return store.blocks.some((x) => (x.blockerId === a && x.blockedId === b) || (x.blockerId === b && x.blockedId === a));
+}
+
+export function isMutedLocal(userId: number): boolean {
+  const me = currentUserId;
+  return me !== null && store.mutes.some((m) => m.muterId === me && m.mutedId === userId);
 }
 
 export async function reportUser(userId: number, reason: string): Promise<void> {
@@ -496,7 +930,13 @@ export async function reportUser(userId: number, reason: string): Promise<void> 
 
 // -------------------------------------------------------------- feed -----
 export async function listFeed(): Promise<Post[]> {
-  return [...store.posts].reverse().map((p) => ({ ...p, author: userById(p.authorId) }));
+  // Muted accounts' posts are suppressed from the feed (muting does
+  // not delete follows or messages — it only hides their content).
+  const me = currentUserId;
+  const muted = new Set(store.mutes.filter((m) => m.muterId === me).map((m) => m.mutedId));
+  return [...store.posts].reverse()
+    .filter((p) => !muted.has(p.authorId))
+    .map((p) => ({ ...p, author: userById(p.authorId) }));
 }
 
 export async function createPost(args: {
@@ -835,9 +1275,14 @@ export function subscribe(onUpdate: () => void): () => void {
 export const ACTIONS = [
   'getAuthStatus', 'createProfile', 'signInWithProfile', 'signInWithGoogle',
   'getSessionUser', 'revokeSession', 'getAuthLinks', 'linkGoogle',
-  'updateProfile', 'getProfile', 'listUsers', 'followUser', 'unfollowUser',
+  'updateProfile', 'getProfile', 'getPublicProfile', 'getMyProfileServer',
+  'getMyPrivacy', 'updateMyPrivacy', 'uploadProfilePhoto',
+  'listFollowRequests', 'listBlockedMuted', 'listFollowersFollowing',
+  'getRoomIdentity', 'joinClubroomWithIdentity', 'updateRoomIdentity',
+  'listUsers', 'followUser', 'unfollowUser',
   'listFollowers', 'listFollowing', 'requestFollow', 'respondFollowRequest',
-  'blockUser', 'unblockUser', 'reportUser', 'listFeed', 'createPost',
+  'respondFollowRequestByFollower',
+  'blockUser', 'unblockUser', 'muteUser', 'unmuteUser', 'reportUser', 'listFeed', 'createPost',
   'deletePost', 'toggleLike', 'toggleSave', 'listComments', 'addComment',
   'deleteComment', 'listSaved', 'listPostsByUser', 'getPost', 'listStories',
   'createStory', 'deleteStory', 'voteStoryPoll', 'answerStoryQuestion',

@@ -1,4 +1,4 @@
-// DROP database schema — 28 tables. DDL is Postgres-flavoured; the Muse
+// DROP database schema — 33 tables. DDL is Postgres-flavoured; the Muse
 // hosted build uses the same tables. No dummy rows are seeded.
 
 export const TABLES = [
@@ -11,13 +11,21 @@ export const TABLES = [
   'reels', 'conversations', 'conversation_members', 'messages',
   'slash_invitations', 'clubrooms', 'clubroom_members',
   'notifications', 'saved_items',
+  // Page 04 — Profile, Privacy & Identity (2026-11-19):
+  'privacy_preferences', 'follow_requests', 'mutes',
+  'room_identities', 'privacy_audit_events',
 ] as const;
-// 28 tables. Slider ratings are stored in the poll-vote tables
+// 33 tables. Slider ratings are stored in the poll-vote tables
 // (post_poll_votes / story_poll_votes) with a rating value.
 // NOTE: otp_challenges is UNUSED — phone + OTP is disabled (2026-11-19).
 
 export const DDL = `
-CREATE TABLE users (id SERIAL PRIMARY KEY, username TEXT UNIQUE NOT NULL, display_name TEXT NOT NULL, password_hash TEXT, email TEXT UNIQUE, google_sub TEXT UNIQUE, avatar_url TEXT, bio TEXT, is_private BOOLEAN DEFAULT FALSE, auth_method TEXT NOT NULL DEFAULT 'google', created_at TIMESTAMPTZ DEFAULT NOW());
+CREATE TABLE users (id SERIAL PRIMARY KEY, username TEXT UNIQUE NOT NULL, display_name TEXT NOT NULL, password_hash TEXT, email TEXT UNIQUE, google_sub TEXT UNIQUE, avatar_url TEXT, bio TEXT, is_private BOOLEAN DEFAULT FALSE, auth_method TEXT NOT NULL DEFAULT 'google', cover_url TEXT, links JSONB, location TEXT, birthday DATE, updated_at TIMESTAMPTZ DEFAULT NOW(), created_at TIMESTAMPTZ DEFAULT NOW());
+CREATE TABLE privacy_preferences (user_id INT PRIMARY KEY REFERENCES users(id), is_private BOOLEAN DEFAULT FALSE, activity_status BOOLEAN DEFAULT TRUE, read_receipts BOOLEAN DEFAULT TRUE, who_can_message TEXT DEFAULT 'everyone', who_can_slash TEXT DEFAULT 'friends', who_can_mention TEXT DEFAULT 'everyone', who_can_tag TEXT DEFAULT 'friends', default_room_identity TEXT DEFAULT 'drop', updated_at TIMESTAMPTZ DEFAULT NOW());
+CREATE TABLE follow_requests (id SERIAL PRIMARY KEY, requester_id INT NOT NULL REFERENCES users(id), target_id INT NOT NULL REFERENCES users(id), status TEXT NOT NULL DEFAULT 'pending', created_at TIMESTAMPTZ DEFAULT NOW(), updated_at TIMESTAMPTZ DEFAULT NOW(), UNIQUE (requester_id, target_id));
+CREATE TABLE mutes (muter_id INT NOT NULL REFERENCES users(id), muted_id INT NOT NULL REFERENCES users(id), scope TEXT NOT NULL DEFAULT 'all', created_at TIMESTAMPTZ DEFAULT NOW(), PRIMARY KEY (muter_id, muted_id));
+CREATE TABLE room_identities (id SERIAL PRIMARY KEY, user_id INT NOT NULL REFERENCES users(id), clubroom_id INT NOT NULL REFERENCES clubrooms(id), identity_mode TEXT NOT NULL DEFAULT 'drop', alias TEXT, avatar_url TEXT, created_at TIMESTAMPTZ DEFAULT NOW(), updated_at TIMESTAMPTZ DEFAULT NOW(), UNIQUE (user_id, clubroom_id));
+CREATE TABLE privacy_audit_events (id SERIAL PRIMARY KEY, user_id INT NOT NULL REFERENCES users(id), action TEXT NOT NULL, detail TEXT, created_at TIMESTAMPTZ DEFAULT NOW());
 CREATE TABLE auth_identities (id SERIAL PRIMARY KEY, user_id INT REFERENCES users(id), provider TEXT NOT NULL, provider_user_id TEXT NOT NULL, email TEXT, UNIQUE(provider, provider_user_id));
 CREATE TABLE auth_sessions (id SERIAL PRIMARY KEY, user_id INT REFERENCES users(id), session_hash TEXT UNIQUE NOT NULL, expires_at TIMESTAMPTZ NOT NULL, revoked_at TIMESTAMPTZ, created_at TIMESTAMPTZ DEFAULT NOW());
 CREATE TABLE otp_challenges (id SERIAL PRIMARY KEY, phone TEXT NOT NULL, code_hash TEXT NOT NULL, purpose TEXT NOT NULL, expires_at TIMESTAMPTZ NOT NULL, attempts INT DEFAULT 0, used_at TIMESTAMPTZ, created_at TIMESTAMPTZ DEFAULT NOW());

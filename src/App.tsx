@@ -6,8 +6,11 @@ import {
   listFeed, listStories, createStory, createPost, listDrops, listUsers,
   listConversations, getUnreadCounts, followUser, getAuthStatus,
   getAdminUsers, getLocalUserCount, isOwnerEmail,
+  getPublicProfile, getMyProfileServer, setDbConfigured,
+  listFollowers, listFollowing,
 } from './lib/api';
-import type { AdminUsersData } from './lib/api';
+import type { AdminUsersData, PublicProfile } from './lib/api';
+import { ProfilePage, EditProfilePage, PrivacyPage, RoomIdentityPage } from './components/ProfileViews';
 import { renderGoogleButton } from './lib/google';
 import { subscribeToUpdates } from './lib/realtime';
 import StoryViewer from './components/StoryViewer';
@@ -18,7 +21,7 @@ import DropHub from './components/DropHub';
 import MessagesView from './components/MessagesView';
 import { ReelsView, ClubroomsView, SearchView, NotificationsView, SavedView } from './components/OtherViews';
 
-type View = 'home' | 'discover' | 'hub' | 'search' | 'profile' | 'messages' | 'clubrooms' | 'notifications' | 'saved' | 'admin';
+type View = 'home' | 'discover' | 'hub' | 'search' | 'profile' | 'messages' | 'clubrooms' | 'notifications' | 'saved' | 'admin' | 'edit-profile' | 'privacy' | 'room-identity';
 
 const NAV: { id: View; label: string; icon: string }[] = [
   { id: 'home', label: 'Home', icon: '🏠' },
@@ -54,6 +57,12 @@ export default function App() {
   const [adminData, setAdminData] = useState<AdminUsersData | null>(null);
   const [adminLoading, setAdminLoading] = useState(false);
   const [adminError, setAdminError] = useState('');
+  // Profile (Page 04): the username being viewed (null = my own profile),
+  // the loaded public profile, and the clubroom for Room Identity.
+  const [viewedUsername, setViewedUsername] = useState<string | null>(null);
+  const [viewedProfile, setViewedProfile] = useState<PublicProfile | null>(null);
+  const [profileError, setProfileError] = useState('');
+  const [roomIdentity, setRoomIdentity] = useState<{ id: number; name: string } | null>(null);
   const googleBtnRef = useRef<HTMLDivElement | null>(null);
   const linkGoogleBtnRef = useRef<HTMLDivElement | null>(null);
 
@@ -86,8 +95,51 @@ export default function App() {
 
   useEffect(() => {
     void getSessionUser().then((u) => { if (u) setMe(u); });
-    void getAuthStatus().then(setAuthStatus);
+    void getAuthStatus().then((s) => { setDbConfigured(s.dbConfigured); setAuthStatus(s); });
   }, []);
+
+  // Profile (Page 04): load the public profile whenever the profile
+  // view opens — my own profile, or another user's by username.
+  useEffect(() => {
+    if (!me || view !== 'profile') return;
+    let cancelled = false;
+    setProfileError('');
+    setViewedProfile(null);
+    const load = async () => {
+      try {
+        if (viewedUsername) {
+          setViewedProfile(await getPublicProfile(viewedUsername));
+        } else {
+          const server = await getMyProfileServer();
+          if (cancelled) return;
+          if (server) setViewedProfile(server);
+          else {
+            const [fl, fg] = await Promise.all([
+              listFollowers(me.id).catch(() => [] as User[]),
+              listFollowing(me.id).catch(() => [] as User[]),
+            ]);
+            if (cancelled) return;
+            setViewedProfile({
+              id: me.id, username: me.username, displayName: me.displayName,
+              avatarUrl: me.avatarUrl ?? null, coverUrl: me.coverUrl ?? null,
+              bio: me.bio ?? '', links: me.links ?? [], location: me.location ?? null,
+              birthday: me.birthday ?? null, isPrivate: Boolean(me.isPrivate),
+              relationship: 'self',
+              counts: {
+                posts: feed.filter((p) => p.authorId === me.id).length,
+                followers: fl.length,
+                following: fg.length,
+              },
+            });
+          }
+        }
+      } catch (err) {
+        if (!cancelled) setProfileError(err instanceof Error ? err.message : 'Could not load this profile.');
+      }
+    };
+    void load();
+    return () => { cancelled = true; };
+  }, [me, view, viewedUsername, feed, users, following]);
 
   useEffect(() => {
     if (!me) return;
@@ -307,9 +359,9 @@ export default function App() {
 
       {view === 'discover' && <ReelsView />}
       {view === 'hub' && <DropHub drops={drops} onRefresh={() => void refresh()} />}
-      {view === 'search' && <SearchView users={users} />}
+      {view === 'search' && <SearchView users={users} onOpenProfile={(username) => { setViewedUsername(username); setView('profile'); }} />}
       {view === 'messages' && <MessagesView conversations={conversations} users={users} me={me} />}
-      {view === 'clubrooms' && <ClubroomsView me={me} />}
+      {view === 'clubrooms' && <ClubroomsView me={me} onJoinIdentity={(room) => { setRoomIdentity(room); setView('room-identity'); }} />}
       {view === 'notifications' && <NotificationsView />}
       {view === 'saved' && <SavedView />}
       {view === 'admin' && (
@@ -350,20 +402,53 @@ export default function App() {
         </div>
       )}
       {view === 'profile' && (
-        <div style={{ padding: 12 }}>
-          <h2>{me.displayName} (@{me.username})</h2>
-          <p className="muted">{me.bio ?? ''}</p>
-          <h3>Sign-in &amp; security</h3>
-          <p>Google: {authLinks.hasGoogle ? `linked${me.email ? ` (${me.email})` : ''}` : authStatus.googleConfigured ? 'not linked' : 'coming soon — credentials needed'}</p>
-          {authStatus.googleConfigured && !authLinks.hasGoogle && <div ref={linkGoogleBtnRef} />}
-          <button className="ghost" onClick={async () => { await revokeSession(); setMe(null); }}>Sign out / revoke session</button>
-          {isOwnerEmail(me.email) && (
-            <button className="primary" onClick={() => setView('admin')}>Admin — user insights</button>
+        <>
+          {profileError ? (
+            <div style={{ padding: 12 }}>
+              <div className="notice">{profileError}</div>
+              <button className="ghost" onClick={() => { setViewedUsername(null); setView('home'); }}>Back to Home</button>
+            </div>
+          ) : !viewedProfile ? (
+            <p className="muted" style={{ padding: 16 }}>Loading profile…</p>
+          ) : (
+            <>
+              <ProfilePage
+                profile={viewedProfile}
+                me={me}
+                isOwner={viewedProfile.id === me.id}
+                onEdit={() => setView('edit-profile')}
+                onPrivacy={() => setView('privacy')}
+                onAdmin={() => setView('admin')}
+                onOpenUser={(username) => { setViewedUsername(username); setView('profile'); }}
+                onMessage={() => setView('messages')}
+              />
+              {viewedProfile.id === me.id && (
+                <div style={{ padding: '0 12px 12px' }}>
+                  <h3>Sign-in &amp; security</h3>
+                  <p>Google: {authLinks.hasGoogle ? `linked${me.email ? ` (${me.email})` : ''}` : authStatus.googleConfigured ? 'not linked' : 'coming soon — credentials needed'}</p>
+                  {authStatus.googleConfigured && !authLinks.hasGoogle && <div ref={linkGoogleBtnRef} />}
+                  <button className="ghost" onClick={async () => { await revokeSession(); setMe(null); }}>Sign out / revoke session</button>
+                  {isOwnerEmail(me.email) && (
+                    <button className="primary" style={{ marginLeft: 8 }} onClick={() => setView('admin')}>Admin — user insights</button>
+                  )}
+                </div>
+              )}
+            </>
           )}
-          <h3>Your posts</h3>
-          {feed.filter((p) => p.authorId === me.id).map((p) => <div key={p.id} className="card">{p.caption}</div>)}
-          <button className="ghost" onClick={() => setView('saved')}>Saved items</button>
-        </div>
+        </>
+      )}
+      {view === 'edit-profile' && (
+        <EditProfilePage
+          me={me}
+          onBack={() => setView('profile')}
+          onSaved={(u) => { setMe(u); void refresh(); setView('profile'); }}
+        />
+      )}
+      {view === 'privacy' && (
+        <PrivacyPage me={me} onBack={() => setView('profile')} onSignOut={() => setMe(null)} />
+      )}
+      {view === 'room-identity' && roomIdentity && (
+        <RoomIdentityPage me={me} clubroomId={roomIdentity.id} clubroomName={roomIdentity.name} onBack={() => setView('clubrooms')} />
       )}
 
       {viewerIndex !== null && (
@@ -384,7 +469,7 @@ export default function App() {
       {panelOpen && (
         <div className="dock-panel" style={{ [panelSide]: 12, top: '50%', transform: 'translateY(-50%)' } as React.CSSProperties}>
           {NAV.map((n) => (
-            <button key={n.id} className={view === n.id ? 'active' : ''} aria-label={n.label} onClick={() => { setView(n.id); setPanelOpen(false); }}>{n.icon}</button>
+            <button key={n.id} className={view === n.id ? 'active' : ''} aria-label={n.label} onClick={() => { if (n.id === 'profile') setViewedUsername(null); setView(n.id); setPanelOpen(false); }}>{n.icon}</button>
           ))}
         </div>
       )}

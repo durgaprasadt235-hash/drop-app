@@ -15,7 +15,8 @@ posts, or data — every record is created by a real user in the app.
   comments), DropHub (Waiting/Ready, Blast presets), MessagesView
   (DMs + Slash), OtherViews (Reels, Clubrooms, Search, Notifications, Saved)
 - `src/lib/filters.ts` — all 32 DROP filters + 22 DROP effects, verbatim
-- `src/lib/api.ts` — typed client contract: all 66 actions
+- `src/lib/api.ts` — typed client contract: all 80 actions (incl. Page 04 profile/privacy/room-identity)
+- `src/components/ProfileViews.tsx` — Page 04: full Profile page, Edit Profile, Privacy & Security, Room Identity
 - `src/lib/google.ts` — Google Identity Services loader + button
 - `api/auth/google.ts` — Vercel serverless function: verifies the
   Google ID token with Google and issues a 30-day session; when
@@ -26,9 +27,12 @@ posts, or data — every record is created by a real user in the app.
   count + list + sign-ups by day (see "Shared user tracking")
 - `api/lib/db.ts` — Neon Postgres access (users + sessions tables,
   session-hash storage, admin check)
+- `api/lib/profile.ts` — Page 04 shared server helpers: session auth, username/bio/link validation, privacy, blocking, private-profile rules, room-identity confidentiality
+- `api/profile/*` — Page 04 serverless functions: `me` (GET/PATCH), `[username]` (public profile), `me/privacy`, `me/follow-requests`, `follow`, `follow-requests/[id]`, `block`, `mute`, `lists`, `me/blocks`, `upload` (Vercel Blob avatar/cover)
+- `api/clubrooms/[id]/identity.ts` — Page 04: room identity options, join with identity, change my identity (members see only room-facing identities, never account mappings)
 - `server/index.ts` — Node server (Google verification, sessions,
   sealed Drops, Protected rules). Phone + OTP is disabled.
-- `server/schema.ts` + `docs/schema.md` — all 28 database tables
+- `server/schema.ts` + `docs/schema.md` — all 33 database tables (incl. Page 04 privacy/follow-request/mute/room-identity tables)
 - `api/README.md` — server rules to preserve
 
 ## Setup
@@ -52,6 +56,7 @@ Server: `npm run server` uses `tsx`. If you prefer, compile it with
 | `DROP_GOOGLE_CLIENT_ID` | Google token verification (server) | Same client ID as above, read at runtime |
 | `DATABASE_URL` | Shared user tracking (Neon Postgres) | Connection string, Secret, Production — see below |
 | `DROP_ADMIN_EMAILS` | Who may see Admin → user insights | Optional, comma-separated; default `durgaprasadt235@gmail.com` |
+| `BLOB_READ_WRITE_TOKEN` | Avatar / cover photo uploads (Page 04) | Optional; Vercel Storage → Blob store token, Secret, Production. Without it uploads return 503 and the app says storage is not configured. |
 
 Set **both Google IDs to the same client ID** (see "Google sign-in setup" below).
 Phone + OTP is disabled — there are no Twilio variables.
@@ -150,6 +155,7 @@ hashes only; Google ID tokens are never stored.
   tap unfurls the 56×296 panel on the nearest side; 30s idle
   auto-collapse back to the ball.
 - **Real-time:** WebSocket live sync with polling fallback.
+- **Profile, Privacy & Identity (Page 04):** full Profile page (cover, 88px avatar, real Posts/Followers/Following counts, Posts/Reels/Drops/Saved tabs), Edit Profile (display name, username, bio ≤150, links https-only, location, birthday, avatar/cover upload), Privacy & Security (public/private, activity status, read receipts, who can message/Slash/mention/tag, follow requests, blocked/muted, default room identity, sign out), follow requests with accept/decline, blocking (enforced server-side) and muting (suppresses feed, keeps relationships), Room Identity (use my DROP Profile or a room alias — the account mapping is never shown to other members). All privacy toggles persist server-side in Neon; without a DB they persist locally on the device only.
 
 ## GitHub push
 

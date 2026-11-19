@@ -2,9 +2,10 @@
 
 Server implementation: `server/index.ts` (Node built-in `http`, no
 framework) and the Vercel Serverless Functions in `api/` (`auth/google`
-verifies Google ID tokens, `auth/status` reports auth status). Schema:
-`server/schema.ts` and `docs/schema.md` (28 tables).
-Client contract: `src/lib/api.ts` (66 actions).
+verifies Google ID tokens, `auth/status` reports auth status,
+`profile/*` and `clubrooms/[id]/identity` implement Page 04).
+Schema: `server/schema.ts` and `docs/schema.md` (33 tables).
+Client contract: `src/lib/api.ts` (80 actions).
 
 ## Auth — Google only
 
@@ -86,6 +87,47 @@ Client contract: `src/lib/api.ts` (66 actions).
   Link stickers must be `https://` — `http://` is rejected.
 - Music and Donation are marked unavailable (no licensed music library,
   no payments provider) — never fake them.
+
+## Profile, Privacy & Identity (Page 04, 2026-11-19)
+
+- Tables (additive, `api/lib/profile.ts` `ensureProfileTables`): new
+  users columns `cover_url`, `links` (JSONB), `location`, `birthday`,
+  `updated_at`; `privacy_preferences` (per-user toggles + who-can
+  message/Slash/mention/tag + default room identity),
+  `follow_requests` (status pending/accepted/declined/cancelled,
+  unique requester+target), `mutes` (suppresses feed/notifications,
+  keeps relationships), `room_identities` (per user+clubroom, mode
+  'drop'|'room', alias, avatar), `privacy_audit_events`.
+- Endpoints (all Bearer-session authed, ownership checked server-side,
+  client user IDs never trusted): `GET/PATCH /api/profile/me`,
+  `GET /api/profile/[username]` (private profiles return only the
+  public summary to non-approved viewers; blocked viewers get 404),
+  `GET/PATCH /api/profile/me/privacy`, `GET /api/profile/me/follow-requests`,
+  `POST /api/profile/follow-requests/[id]` (target only),
+  `POST/DELETE /api/profile/follow` (private = pending request +
+  notification), `POST/DELETE /api/profile/block` (removes follows
+  both ways, cancels pending requests), `POST/DELETE /api/profile/mute`,
+  `GET /api/profile/lists`, `GET /api/profile/me/blocks`,
+  `GET/POST/PATCH /api/clubrooms/[id]/identity` (member lists show
+  ONLY room-facing identities — no user ids, emails or mappings).
+- Username: 3–30 chars `[a-zA-Z0-9_]`, case-insensitive unique,
+  reserved names rejected (`admin`, `drop`, `support`, …). Bio max
+  150 chars. Links must be `https://`, max 5.
+- Avatar/cover upload: `POST /api/profile/upload` accepts a base64
+  data URL, validates MIME (jpeg/png/webp) and size (≤2 MB) server-side
+  and stores via Vercel Blob (`BLOB_READ_WRITE_TOKEN`). Without the
+  token it returns 503 and the UI says storage is not configured;
+  the Google photo or initials avatar is used instead. Binaries are
+  never stored in DB rows.
+- Privacy toggles persist server-side; without a shared DB they
+  persist in localStorage on the device only (the UI must not claim
+  otherwise). Muting suppresses muted users' posts from the feed
+  (`listFeed`); blocking is enforced via `isBlocked` on profile,
+  follow, message, Slash and search paths.
+- Client: `src/components/ProfileViews.tsx` (Profile, Edit Profile,
+  Privacy & Security, Room Identity) wired in `src/App.tsx` views
+  `profile` / `edit-profile` / `privacy` / `room-identity`; Search
+  opens a user's profile, Clubrooms offers "Join with identity".
 
 ## Messages & Slash
 

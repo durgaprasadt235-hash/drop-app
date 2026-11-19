@@ -1,4 +1,4 @@
-# DROP Database Schema — 28 tables
+# DROP Database Schema — 33 tables
 
 Postgres-flavoured DDL lives in `server/schema.ts` (`DDL`). No dummy rows
 are seeded — every row is created by a real user in the app.
@@ -33,6 +33,13 @@ are seeded — every row is created by a real user in the app.
 | 26 | `clubroom_members` | Clubroom membership |
 | 27 | `notifications` | Notifications: user, type, body, read |
 | 28 | `saved_items` | Saved items (user, post) — the Saved view |
+| 29 | `privacy_preferences` | Page 04: per-user privacy — is_private, activity status, read receipts, who can message/Slash/mention/tag, default room identity |
+| 30 | `follow_requests` | Page 04: follow requests (requester, target, status pending/accepted/declined/cancelled, unique requester+target) |
+| 31 | `mutes` | Page 04: muter → muted pairs + scope (muting suppresses feed/notifications, does not delete relationships) |
+| 32 | `room_identities` | Page 04: per-user-per-clubroom identity (mode 'drop' or 'room', alias, avatar) — the account mapping is never exposed to ordinary members |
+| 33 | `privacy_audit_events` | Page 04: security-relevant changes (profile/privacy/block/mute/room actions, no personal data beyond the user id) |
+
+`users` also gained Page 04 columns: `cover_url`, `links` (JSONB, https only), `location`, `birthday`, `updated_at`.
 
 ## Key rules (enforced server-side, see `api/README.md`)
 
