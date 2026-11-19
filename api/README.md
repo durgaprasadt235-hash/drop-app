@@ -110,6 +110,12 @@ Client contract: `src/lib/api.ts` (80 actions).
   `GET /api/profile/lists`, `GET /api/profile/me/blocks`,
   `GET/POST/PATCH /api/clubrooms/[id]/identity` (member lists show
   ONLY room-facing identities — no user ids, emails or mappings).
+  All `/api/profile/*` routes are served by ONE serverless function,
+  `api/profile/[...route].ts`, which dispatches to the handlers in
+  `api/lib/profile-handlers.ts` (helper file, not a function). This
+  keeps the deployment at 5 functions total, under Vercel's Hobby-plan
+  limit of 12 per deployment (Page 04 originally shipped 11 separate
+  profile files = 15 functions, and the deploy failed on that limit).
 - Username: 3–30 chars `[a-zA-Z0-9_]`, case-insensitive unique,
   reserved names rejected (`admin`, `drop`, `support`, …). Bio max
   150 chars. Links must be `https://`, max 5.

@@ -28,7 +28,7 @@ posts, or data — every record is created by a real user in the app.
 - `api/lib/db.ts` — Neon Postgres access (users + sessions tables,
   session-hash storage, admin check)
 - `api/lib/profile.ts` — Page 04 shared server helpers: session auth, username/bio/link validation, privacy, blocking, private-profile rules, room-identity confidentiality
-- `api/profile/*` — Page 04 serverless functions: `me` (GET/PATCH), `[username]` (public profile), `me/privacy`, `me/follow-requests`, `follow`, `follow-requests/[id]`, `block`, `mute`, `lists`, `me/blocks`, `upload` (Vercel Blob avatar/cover)
+- `api/profile/[...route].ts` — ONE Page 04 serverless function serving all `/api/profile/*` routes (`me` GET/PATCH, `[username]` public profile, `me/privacy`, `me/follow-requests`, `follow`, `follow-requests/[id]`, `block`, `mute`, `lists`, `me/blocks`, `upload` Vercel Blob avatar/cover); handler logic lives in `api/lib/profile-handlers.ts`. Single router keeps the deployment at 5 functions, under Vercel's Hobby-plan limit of 12 (11 separate profile files = 15 functions failed the deploy).
 - `api/clubrooms/[id]/identity.ts` — Page 04: room identity options, join with identity, change my identity (members see only room-facing identities, never account mappings)
 - `server/index.ts` — Node server (Google verification, sessions,
   sealed Drops, Protected rules). Phone + OTP is disabled.
