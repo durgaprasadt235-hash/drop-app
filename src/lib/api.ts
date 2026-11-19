@@ -158,20 +158,22 @@ function requireUser(): User {
 
 // ---------------------------------------------------------------- auth ---
 export async function getAuthStatus(): Promise<AuthStatus> {
-  // Ask the deployed serverless function first (runtime env); fall back
-  // to the build-time public client ID used by Google Identity Services.
-  // In local dev (no /api function) the fetch fails and the fallback applies.
+  // Google is configured if EITHER the server (DROP_GOOGLE_CLIENT_ID)
+  // or the build-time public client ID (VITE_GOOGLE_CLIENT_ID) is set.
+  // The server status must never override a set VITE_ ID with false —
+  // that hid the Google button after a redeploy with only VITE_ set.
+  const viteClientId = (import.meta.env.VITE_GOOGLE_CLIENT_ID as string | undefined) ?? '';
+  let serverConfigured = false;
   try {
     const res = await fetch('/api/auth/status');
     if (res.ok) {
       const data = (await res.json()) as { googleConfigured?: boolean };
-      return { googleConfigured: Boolean(data.googleConfigured), phoneConfigured: false };
+      serverConfigured = Boolean(data.googleConfigured);
     }
   } catch {
-    // No serverless function reachable — fall through to the fallback.
+    // No serverless function reachable — rely on the build-time ID.
   }
-  const viteClientId = (import.meta.env.VITE_GOOGLE_CLIENT_ID as string | undefined) ?? '';
-  return { googleConfigured: viteClientId.length > 0, phoneConfigured: false };
+  return { googleConfigured: serverConfigured || viteClientId.length > 0, phoneConfigured: false };
 }
 
 export async function createProfile(args: {
