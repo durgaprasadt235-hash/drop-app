@@ -13,9 +13,8 @@ export const TABLES = [
   'notifications', 'saved_items',
 ] as const;
 // 28 tables. Slider ratings are stored in the poll-vote tables
-// (post_poll_votes / story_poll_votes) with a rating value, and
-// password-reset tokens are single-use rows in otp_challenges
-// (purpose='forgot'), so no separate tables are needed for them.
+// (post_poll_votes / story_poll_votes) with a rating value.
+// NOTE: otp_challenges is UNUSED — phone + OTP is disabled (2026-11-19).
 
 export const DDL = `
 CREATE TABLE users (id SERIAL PRIMARY KEY, username TEXT UNIQUE NOT NULL, display_name TEXT NOT NULL, password_hash TEXT, avatar_url TEXT, bio TEXT, is_private BOOLEAN DEFAULT FALSE, created_at TIMESTAMPTZ DEFAULT NOW());

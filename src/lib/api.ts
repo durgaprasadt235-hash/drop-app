@@ -1,9 +1,14 @@
-// DROP typed API contract — the 70 actions used by the Muse app.
+// DROP typed API contract — the actions used by the Muse app.
 // Standalone implementation: backed by localStorage, so this deployment
 // works for demo / testing without the Muse hosted database. The server
 // rules in api/README.md still apply (sealed Drops, Protected grants,
-// OTP rules, 30-day revocable sessions); in production they must be
+// 30-day revocable sessions); in production they must be
 // enforced server-side, never in the client alone.
+//
+// Auth is Google-only (2026-11-19): in-app profile sign-in, plus real
+// Google sign-in verified server-side by /api/auth/google. Phone + OTP
+// is disabled — there is no phone sign-in, no OTP, and no phone-based
+// password reset anywhere in this client.
 //
 // Real-time: `subscribe()` uses a viewer channel where available and
 // falls back to polling (see the polling interval below).
@@ -15,6 +20,9 @@ export interface User {
   avatarUrl?: string | null;
   bio?: string;
   isPrivate?: boolean;
+  /** Google account id (sub) this profile is linked to, if any. */
+  googleSub?: string | null;
+  email?: string | null;
 }
 
 export interface Post {
@@ -70,7 +78,8 @@ export interface Message {
 
 export interface AuthStatus {
   googleConfigured: boolean;
-  smsConfigured: boolean;
+  /** Phone + OTP is disabled — always false. */
+  phoneConfigured: false;
 }
 
 export interface Session {
@@ -149,8 +158,20 @@ function requireUser(): User {
 
 // ---------------------------------------------------------------- auth ---
 export async function getAuthStatus(): Promise<AuthStatus> {
-  // Standalone: no Google / Twilio credentials are bundled.
-  return { googleConfigured: false, smsConfigured: false };
+  // Ask the deployed serverless function first (runtime env); fall back
+  // to the build-time public client ID used by Google Identity Services.
+  // In local dev (no /api function) the fetch fails and the fallback applies.
+  try {
+    const res = await fetch('/api/auth/status');
+    if (res.ok) {
+      const data = (await res.json()) as { googleConfigured?: boolean };
+      return { googleConfigured: Boolean(data.googleConfigured), phoneConfigured: false };
+    }
+  } catch {
+    // No serverless function reachable — fall through to the fallback.
+  }
+  const viteClientId = (import.meta.env.VITE_GOOGLE_CLIENT_ID as string | undefined) ?? '';
+  return { googleConfigured: viteClientId.length > 0, phoneConfigured: false };
 }
 
 export async function createProfile(args: {
@@ -181,27 +202,78 @@ export async function signInWithProfile(args: {
   return { user, session };
 }
 
-export async function signInWithGoogle(_idToken: string): Promise<never> {
-  // Real Google verification happens server-side in the Muse build.
-  // No credentials are configured in this standalone export.
-  throw new Error('Google sign-in needs credentials — see .env.example (DROP_GOOGLE_CLIENT_ID).');
+interface GoogleAuthResponse {
+  ok: boolean;
+  error?: string;
+  user?: { sub: string; email: string; name?: string; picture?: string };
+  session?: { token: string; expiresAt: string };
 }
 
-export async function requestPhoneOtp(_phone: string): Promise<never> {
-  throw new Error('Phone OTP needs credentials — see .env.example (DROP_TWILIO_*).');
+async function callGoogleAuth(idToken: string): Promise<GoogleAuthResponse> {
+  const res = await fetch('/api/auth/google', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    // ID token travels in the POST body, never in a URL.
+    body: JSON.stringify({ idToken }),
+  });
+  const data = (await res.json().catch(() => ({}))) as GoogleAuthResponse;
+  if (!res.ok || !data.ok || !data.user || !data.session) {
+    throw new Error(data.error ?? 'Google sign-in failed — token could not be verified.');
+  }
+  return data;
 }
 
-export async function verifyPhoneOtp(_phone: string, _code: string): Promise<never> {
-  throw new Error('Phone OTP needs credentials — see .env.example (DROP_TWILIO_*).');
+function slugFromEmail(email: string): string {
+  const base = email
+    .split('@')[0]
+    .toLowerCase()
+    .replace(/[^a-z0-9_]+/g, '_')
+    .replace(/^_+|_+$/g, '') || 'user';
+  let username = base;
+  let n = 1;
+  while (store.users.some((u) => u.username === username)) {
+    n += 1;
+    username = `${base}_${n}`;
+  }
+  return username;
 }
 
-export async function forgotPassword(_identifier: string): Promise<never> {
-  throw new Error('Forgot password needs a verified phone and SMS credentials — see .env.example.');
+export async function signInWithGoogle(idToken: string): Promise<{ user: User; session: Session }> {
+  const data = await callGoogleAuth(idToken);
+  const verified = data.user!;
+  // Create or link the local profile for this Google account (by sub,
+  // then by verified email). No profile is created unless Google
+  // verified the token server-side — a fake token never signs anyone in.
+  let user = store.users.find((u) => u.googleSub === verified.sub)
+    ?? store.users.find((u) => u.email === verified.email);
+  if (!user) {
+    user = {
+      id: nextId(),
+      username: slugFromEmail(verified.email),
+      displayName: verified.name ?? verified.email.split('@')[0],
+      avatarUrl: verified.picture ?? null,
+      bio: '',
+      isPrivate: false,
+      googleSub: verified.sub,
+      email: verified.email,
+    };
+    store.users.push(user);
+  } else {
+    user.googleSub = verified.sub;
+    user.email = verified.email;
+    if (verified.name && !user.displayName) user.displayName = verified.name;
+    if (verified.picture && !user.avatarUrl) user.avatarUrl = verified.picture;
+  }
+  saveStore(store);
+  const session = storeSession(user.id, data.session!.token, data.session!.expiresAt);
+  return { user, session };
 }
 
-export async function resetPassword(_resetToken: string, _newPassword: string): Promise<void> {
-  throw new Error('Password reset needs SMS credentials — see .env.example.');
-}
+// Phone + OTP is disabled (2026-11-19). The phone functions were removed
+// from this client entirely — there is no phone sign-in, no OTP request
+// or verification, and no phone-based password reset. Password reset is
+// unavailable: users who signed up with a password and forget it must
+// sign in with Google (if linked) — see the note on the sign-in screen.
 
 export async function getSessionUser(): Promise<User | null> {
   return currentUserId ? (userById(currentUserId) ?? null) : null;
@@ -213,16 +285,24 @@ export async function revokeSession(): Promise<void> {
   localStorage.removeItem('drop-app-session');
 }
 
-export async function getAuthLinks(): Promise<{ hasPassword: boolean; hasGoogle: boolean; hasPhone: boolean }> {
-  return { hasPassword: true, hasGoogle: false, hasPhone: false };
+export async function getAuthLinks(): Promise<{ hasPassword: boolean; hasGoogle: boolean }> {
+  const me = currentUserId ? userById(currentUserId) : undefined;
+  return { hasPassword: true, hasGoogle: Boolean(me?.googleSub) };
 }
 
-export async function linkGoogle(): Promise<never> {
-  throw new Error('Google linking needs credentials — see .env.example.');
-}
-
-export async function linkPhone(): Promise<never> {
-  throw new Error('Phone linking needs SMS credentials — see .env.example.');
+export async function linkGoogle(idToken: string): Promise<User> {
+  const me = requireUser();
+  const data = await callGoogleAuth(idToken);
+  const verified = data.user!;
+  // A Google account already linked to a different profile cannot be
+  // linked to this one.
+  const other = store.users.find((u) => u.googleSub === verified.sub && u.id !== me.id);
+  if (other) throw new Error('That Google account is already linked to another profile.');
+  me.googleSub = verified.sub;
+  me.email = verified.email;
+  if (verified.picture && !me.avatarUrl) me.avatarUrl = verified.picture;
+  saveStore(store);
+  return me;
 }
 
 export async function updateProfile(args: Partial<User> & { id: number }): Promise<User> {
@@ -241,16 +321,20 @@ export async function listUsers(): Promise<User[]> {
   return [...store.users];
 }
 
-function issueSession(userId: number): Session {
-  const session: Session = {
-    token: `drop-${userId}-${Date.now()}`,
-    userId,
-    expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
-  };
+function storeSession(userId: number, token: string, expiresAt: string): Session {
+  const session: Session = { token, userId, expiresAt };
   currentUserId = userId;
   localStorage.setItem('drop-app-user-id', String(userId));
   localStorage.setItem('drop-app-session', JSON.stringify(session));
   return session;
+}
+
+function issueSession(userId: number): Session {
+  return storeSession(
+    userId,
+    `drop-${userId}-${Date.now()}`,
+    new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+  );
 }
 
 // ------------------------------------------------------------- follows ---
@@ -648,8 +732,7 @@ export function subscribe(onUpdate: () => void): () => void {
 
 export const ACTIONS = [
   'getAuthStatus', 'createProfile', 'signInWithProfile', 'signInWithGoogle',
-  'requestPhoneOtp', 'verifyPhoneOtp', 'forgotPassword', 'resetPassword',
-  'getSessionUser', 'revokeSession', 'getAuthLinks', 'linkGoogle', 'linkPhone',
+  'getSessionUser', 'revokeSession', 'getAuthLinks', 'linkGoogle',
   'updateProfile', 'getProfile', 'listUsers', 'followUser', 'unfollowUser',
   'listFollowers', 'listFollowing', 'requestFollow', 'respondFollowRequest',
   'blockUser', 'unblockUser', 'reportUser', 'listFeed', 'createPost',

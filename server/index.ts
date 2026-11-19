@@ -1,17 +1,19 @@
 // DROP server — Node built-in http, no framework dependency.
 // Run with:  npx tsx server/index.ts   (or compile with tsc and node dist-server/index.js)
-// Env: DROP_GOOGLE_CLIENT_ID, DROP_GOOGLE_CLIENT_SECRET,
-//      DROP_TWILIO_ACCOUNT_SID, DROP_TWILIO_AUTH_TOKEN, DROP_TWILIO_FROM_NUMBER
-// All 70 actions from src/lib/api.ts are dispatched here in the Muse build;
+// Env: DROP_GOOGLE_CLIENT_ID
+// All actions from src/lib/api.ts are dispatched here in the Muse build;
 // this file implements the same rules against an in-memory store so the
 // logic is reviewable and testable without the hosted database. Replace
 // the in-memory store with the Postgres tables in server/schema.ts for
 // production — the rules below must stay server-side.
 //
+// PHONE + OTP IS DISABLED (2026-11-19): the OTP helpers below are
+// reference-only, kept for the record. No HTTP route exposes them and
+// authStatus() always reports smsConfigured=false. Do not re-expose
+// them without a user decision.
+//
 // Rules enforced here (never trust the client alone):
 // - Google ID tokens are verified with Google (POST body, never a URL).
-// - OTP: 10-min expiry, single-use, 5-try lockout, 3 resends per 15 min,
-//   30s cooldown between resends. Only the code hash is stored.
 // - Sessions: 30 days, revocable, only the session hash is stored.
 // - Sealed Drops: no caption/media before blast time, except the creator.
 // - Protected Drops: no Save / Share, server rejects saving them.
@@ -23,12 +25,9 @@ import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 
 const PORT = Number(process.env.PORT ?? 3001);
 const GOOGLE_CLIENT_ID = process.env.DROP_GOOGLE_CLIENT_ID ?? '';
-const TWILIO_SID = process.env.DROP_TWILIO_ACCOUNT_SID ?? '';
-const TWILIO_TOKEN = process.env.DROP_TWILIO_AUTH_TOKEN ?? '';
-const TWILIO_FROM = process.env.DROP_TWILIO_FROM_NUMBER ?? '';
 
 export function authStatus() {
-  return { googleConfigured: Boolean(GOOGLE_CLIENT_ID), smsConfigured: Boolean(TWILIO_SID && TWILIO_TOKEN && TWILIO_FROM) };
+  return { googleConfigured: Boolean(GOOGLE_CLIENT_ID), smsConfigured: false };
 }
 
 function hash(value: string): string {
@@ -40,23 +39,17 @@ function safeEqual(a: string, b: string): boolean {
   return ba.length === bb.length && timingSafeEqual(ba, bb);
 }
 
-// --- OTP -----------------------------------------------------------------
+// --- OTP (DISABLED — reference only, no HTTP route exposes it) ---------
+// Phone + OTP was removed 2026-11-19. Kept here only so the rules that
+// used to apply (10-min expiry, single-use, 5-try lockout, 3 resends
+// per 15 min, 30s cooldown, only the code hash stored) stay on record.
+// requestOtp() always refuses because smsConfigured is always false.
 interface Otp { phone: string; codeHash: string; purpose: string; expiresAt: number; attempts: number; used: boolean; createdAt: number }
 const otps: Otp[] = [];
-const otpSends: { phone: string; at: number }[] = [];
 
-export function requestOtp(phone: string, purpose: 'signup' | 'signin' | 'forgot'): { ok: boolean; error?: string } {
-  if (!authStatus().smsConfigured) return { ok: false, error: 'SMS credentials needed — set DROP_TWILIO_*' };
-  const now = Date.now();
-  const recent = otpSends.filter((s) => s.phone === phone && now - s.at < 15 * 60 * 1000);
-  if (recent.length >= 3) return { ok: false, error: 'Too many codes — try again in 15 minutes.' };
-  if (recent.length > 0 && now - recent[recent.length - 1].at < 30 * 1000) return { ok: false, error: 'Wait 30 seconds before resending.' };
-  const code = String(Math.floor(100000 + Math.random() * 900000));
-  otps.push({ phone, codeHash: hash(code), purpose, expiresAt: now + 10 * 60 * 1000, attempts: 0, used: false, createdAt: now });
-  otpSends.push({ phone, at: now });
-  // Send via Twilio (real SMS in production). The code itself is never logged.
-  void sendSms(phone, `Your DROP code is ${code}. It expires in 10 minutes.`);
-  return { ok: true };
+export function requestOtp(_phone: string, _purpose: 'signup' | 'signin' | 'forgot'): { ok: boolean; error?: string } {
+  // DISABLED — phone + OTP removed 2026-11-19. No SMS is ever sent.
+  return { ok: false, error: 'Phone sign-in is disabled.' };
 }
 
 export function verifyOtp(phone: string, code: string, purpose: string): boolean {
@@ -71,17 +64,7 @@ export function verifyOtp(phone: string, code: string, purpose: string): boolean
   return true;
 }
 
-async function sendSms(to: string, body: string): Promise<void> {
-  const url = `https://api.twilio.com/2010-04-01/Accounts/${TWILIO_SID}/Messages.json`;
-  await fetch(url, {
-    method: 'POST',
-    headers: {
-      Authorization: `Basic ${Buffer.from(`${TWILIO_SID}:${TWILIO_TOKEN}`).toString('base64')}`,
-      'Content-Type': 'application/x-www-form-urlencoded',
-    },
-    body: new URLSearchParams({ To: to, From: TWILIO_FROM, Body: body }),
-  });
-}
+// (Twilio SMS sender removed with phone auth — see DISABLED note above.)
 
 // --- Google ---------------------------------------------------------------
 export async function verifyGoogleIdToken(idToken: string): Promise<{ sub: string; email: string; name?: string; picture?: string } | null> {
@@ -119,6 +102,30 @@ export function revokeSession(token: string): void {
   if (s) s.revoked = true;
 }
 
+// --- Google users (in-memory reference store) ---------------------------
+interface GoogleUser { id: number; googleSub: string; email: string; displayName: string; avatarUrl?: string }
+const googleUsers: GoogleUser[] = [];
+let googleUserSeq = 0;
+
+export function findOrCreateGoogleUser(verified: { sub: string; email: string; name?: string; picture?: string }): GoogleUser {
+  const existing = googleUsers.find((u) => u.googleSub === verified.sub)
+    ?? googleUsers.find((u) => u.email === verified.email);
+  if (existing) {
+    existing.googleSub = verified.sub;
+    existing.email = verified.email;
+    return existing;
+  }
+  const user: GoogleUser = {
+    id: ++googleUserSeq,
+    googleSub: verified.sub,
+    email: verified.email,
+    displayName: verified.name ?? verified.email.split('@')[0],
+    avatarUrl: verified.picture,
+  };
+  googleUsers.push(user);
+  return user;
+}
+
 // --- HTTP ------------------------------------------------------------------
 async function readJson(req: IncomingMessage): Promise<Record<string, unknown>> {
   const chunks: Buffer[] = [];
@@ -136,18 +143,15 @@ const server = createServer(async (req, res) => {
   const url = new URL(req.url ?? '/', 'http://localhost');
   if (req.method === 'GET' && url.pathname === '/health') return send(res, 200, { ok: true, ...authStatus() });
   if (req.method === 'GET' && url.pathname === '/auth/status') return send(res, 200, authStatus());
-  if (req.method === 'POST' && url.pathname === '/auth/phone/otp') {
-    const body = await readJson(req);
-    const r = requestOtp(String(body.phone ?? ''), (body.purpose as 'signup' | 'signin' | 'forgot') ?? 'signup');
-    return send(res, r.ok ? 200 : 400, r);
-  }
+  // No /auth/phone/otp route — phone + OTP is disabled (2026-11-19).
   if (req.method === 'POST' && url.pathname === '/auth/google') {
     const body = await readJson(req);
     const verified = await verifyGoogleIdToken(String(body.idToken ?? ''));
     if (!verified) return send(res, 401, { error: 'Google token verification failed or credentials not configured.' });
-    return send(res, 200, { user: verified, session: issueSession(0) });
+    const user = findOrCreateGoogleUser(verified);
+    return send(res, 200, { user, session: issueSession(user.id) });
   }
-  return send(res, 404, { error: 'Not found. See api/README.md for the full 70-action contract.' });
+  return send(res, 404, { error: 'Not found. See api/README.md for the full action contract.' });
 });
 
 if (process.env.NODE_ENV !== 'test') {

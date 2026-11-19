@@ -6,7 +6,7 @@ are seeded — every row is created by a real user in the app.
 | # | Table | Purpose |
 |---|-------|---------|
 | 1 | `users` | Profile: username (unique), display name, password hash, avatar, bio, private flag |
-| 2 | `auth_identities` | Google / phone identities linked to a user (`provider`, `provider_user_id`, email) |
+| 2 | `auth_identities` | Google identities linked to a user (`provider`, `provider_user_id`, email) |
 | 3 | `auth_sessions` | 30-day revocable sessions — only the session hash is stored |
 | 4 | `otp_challenges` | Phone OTPs: code hash only, purpose, expiry, attempts, used flag. Also holds forgot-password tokens (`purpose='forgot'`) |
 | 5 | `follows` | Follower → following pairs |

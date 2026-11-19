@@ -1,26 +1,43 @@
 # DROP Server — rules to preserve
 
 Server implementation: `server/index.ts` (Node built-in `http`, no
-framework). Schema: `server/schema.ts` and `docs/schema.md` (28 tables).
-Client contract: `src/lib/api.ts` (70 actions).
+framework) and the Vercel Serverless Functions in `api/` (`auth/google`
+verifies Google ID tokens, `auth/status` reports auth status). Schema:
+`server/schema.ts` and `docs/schema.md` (28 tables).
+Client contract: `src/lib/api.ts` (65 actions).
 
-## Auth
+## Auth — Google only
 
 - In-app profile sign-in uses a password (hashed server-side) and issues
   a revocable 30-day session; only the session hash is stored.
-- Google OAuth: the client sends the Google ID token to the server; the
-  server verifies it with Google via a POST body to
-  `https://oauth2.googleapis.com/tokeninfo` (never a URL query string),
-  checks `aud === DROP_GOOGLE_CLIENT_ID`, then creates/links the account.
-  If `DROP_GOOGLE_CLIENT_ID` is not set, Google shows
-  "coming soon — credentials needed", never a fake login.
-- Phone OTP (Twilio): code is 6 digits, 10-minute expiry, single-use,
-  5-try lockout, max 3 sends per 15 minutes per phone, 30-second cooldown
-  between resends. Only the code hash is stored; the code is never logged.
-  If `DROP_TWILIO_*` is not set, phone OTP shows "credentials needed".
-- Forgot password: identifier → OTP to the account's verified phone →
-  one-time reset token → new password.
-- Link/unlink Google and phone from Profile → Sign-in & security.
+- Google OAuth: the client renders the real Google Identity Services
+  button (`src/lib/google.ts`, public client ID from
+  `VITE_GOOGLE_CLIENT_ID`) and sends the Google ID token to
+  `POST /api/auth/google` in the JSON body (never a URL query string).
+  The function verifies it with Google via a POST body to
+  `https://oauth2.googleapis.com/tokeninfo`, checks
+  `aud === DROP_GOOGLE_CLIENT_ID` (plus `email_verified` and expiry),
+  then creates/links the account by Google `sub` / verified email and
+  issues a 30-day session. If `DROP_GOOGLE_CLIENT_ID` is not set, or
+  the token fails verification, the request is rejected with 401 —
+  Google shows "coming soon — credentials needed", never a fake login.
+- Link Google from Profile → Sign-in & security (same verified flow;
+  a Google account already linked to another profile cannot be
+  re-linked).
+- **Phone + OTP is disabled (2026-11-19):** no phone sign-in, no OTP
+  request/verification, no phone-based password reset, no Twilio calls
+  from the client. The reference OTP code in `server/index.ts` is
+  marked DISABLED and no HTTP route exposes it; `otp_challenges` in
+  `server/schema.ts` is unused. Password reset is currently
+  unavailable — a password user who forgets their password can sign in
+  with Google once it is linked.
+- Standalone note: this deployment stores data in `localStorage` and
+  the serverless function issues the session token, which the client
+  stores. In a production deployment backed by Postgres
+  (`server/schema.ts`), the function must create/link the user row and
+  store only the session hash server-side, and sessions must be
+  validated against the server — never trust a client-stored session
+  alone.
 
 ## Drops (sealed / Blast)
 

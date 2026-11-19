@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Drop, Post, Story, User } from './lib/api';
 import {
-  createProfile, signInWithProfile, getSessionUser, revokeSession,
+  createProfile, signInWithProfile, signInWithGoogle, linkGoogle, getAuthLinks,
+  getSessionUser, revokeSession,
   listFeed, listStories, createStory, createPost, listDrops, listUsers,
   listConversations, getUnreadCounts, followUser, getAuthStatus,
 } from './lib/api';
+import { renderGoogleButton } from './lib/google';
 import { subscribeToUpdates } from './lib/realtime';
 import StoryViewer from './components/StoryViewer';
 import StoryEditor from './components/StoryEditor';
@@ -39,12 +41,15 @@ export default function App() {
   const [following, setFollowing] = useState<Set<number>>(new Set());
   const [viewerIndex, setViewerIndex] = useState<number | null>(null);
   const [editing, setEditing] = useState<'story' | 'post' | null>(null);
-  const [authMode, setAuthMode] = useState<'signin' | 'signup' | 'forgot'>('signin');
+  const [authMode, setAuthMode] = useState<'signin' | 'signup'>('signin');
   const [username, setUsername] = useState('');
   const [displayName, setDisplayName] = useState('');
   const [password, setPassword] = useState('');
   const [authError, setAuthError] = useState('');
-  const [authStatus, setAuthStatus] = useState({ googleConfigured: false, smsConfigured: false });
+  const [authStatus, setAuthStatus] = useState({ googleConfigured: false, phoneConfigured: false as const });
+  const [authLinks, setAuthLinks] = useState({ hasPassword: true, hasGoogle: false });
+  const googleBtnRef = useRef<HTMLDivElement | null>(null);
+  const linkGoogleBtnRef = useRef<HTMLDivElement | null>(null);
 
   // AssistiveTouch dock
   const [ball, setBall] = useState<{ x: number; y: number }>(() => {
@@ -77,6 +82,53 @@ export default function App() {
     void getSessionUser().then((u) => { if (u) setMe(u); });
     void getAuthStatus().then(setAuthStatus);
   }, []);
+
+  useEffect(() => {
+    if (!me) return;
+    void getAuthLinks().then(setAuthLinks);
+  }, [me]);
+
+  // Real Google sign-in button (Google Identity Services) on the
+  // sign-in screen. Rendered only when Google is configured; otherwise
+  // the screen honestly says "coming soon — credentials needed".
+  useEffect(() => {
+    if (me || !authStatus.googleConfigured) return;
+    const el = googleBtnRef.current;
+    if (!el) return;
+    let cancelled = false;
+    void renderGoogleButton(el, async (idToken) => {
+      if (cancelled) return;
+      setAuthError('');
+      try {
+        const r = await signInWithGoogle(idToken);
+        setMe(r.user);
+        void refresh();
+      } catch (err) {
+        setAuthError(err instanceof Error ? err.message : 'Google sign-in failed.');
+      }
+    }).catch((err: unknown) => {
+      if (!cancelled) setAuthError(err instanceof Error ? err.message : 'Google sign-in failed to load.');
+    });
+    return () => { cancelled = true; };
+  }, [me, authStatus.googleConfigured, authMode, refresh]);
+
+  // "Link Google" button in Profile → Sign-in & security.
+  useEffect(() => {
+    if (!me || view !== 'profile' || !authStatus.googleConfigured || authLinks.hasGoogle) return;
+    const el = linkGoogleBtnRef.current;
+    if (!el) return;
+    let cancelled = false;
+    void renderGoogleButton(el, async (idToken) => {
+      if (cancelled) return;
+      try {
+        await linkGoogle(idToken);
+        setAuthLinks(await getAuthLinks());
+      } catch (err) {
+        alert(err instanceof Error ? err.message : 'Google linking failed.');
+      }
+    }).catch(() => { /* button stays unavailable; sign-in still works */ });
+    return () => { cancelled = true; };
+  }, [me, view, authStatus.googleConfigured, authLinks.hasGoogle]);
 
   useEffect(() => {
     if (!me) return;
@@ -133,9 +185,6 @@ export default function App() {
       if (authMode === 'signup') {
         const r = await createProfile({ username, displayName: displayName || username, password });
         setMe(r.user);
-      } else if (authMode === 'forgot') {
-        setAuthError('Forgot password needs a verified phone and SMS credentials — see .env.example (DROP_TWILIO_*).');
-        return;
       } else {
         const r = await signInWithProfile({ username, password });
         setMe(r.user);
@@ -165,15 +214,18 @@ export default function App() {
           <div style={{ display: 'flex', gap: 8 }}>
             <button className={authMode === 'signin' ? 'primary' : 'ghost'} onClick={() => setAuthMode('signin')}>Sign in</button>
             <button className={authMode === 'signup' ? 'primary' : 'ghost'} onClick={() => setAuthMode('signup')}>Sign up</button>
-            <button className={authMode === 'forgot' ? 'primary' : 'ghost'} onClick={() => setAuthMode('forgot')}>Forgot password</button>
           </div>
           <input value={username} onChange={(e) => setUsername(e.target.value)} placeholder="Username" />
           {authMode === 'signup' && <input value={displayName} onChange={(e) => setDisplayName(e.target.value)} placeholder="Display name" />}
           <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Password" />
           {authError && <div className="notice">{authError}</div>}
-          <button className="primary" onClick={doAuth}>{authMode === 'signup' ? 'Create profile' : authMode === 'forgot' ? 'Send OTP' : 'Sign in'}</button>
-          <button className="ghost" onClick={() => alert(authStatus.googleConfigured ? 'Continue with Google' : 'Google sign-in is coming soon — credentials needed (DROP_GOOGLE_CLIENT_ID).')}>Continue with Google {authStatus.googleConfigured ? '' : '(coming soon — credentials needed)'}</button>
-          <button className="ghost" onClick={() => alert(authStatus.smsConfigured ? 'Phone OTP' : 'Phone OTP is coming soon — credentials needed (DROP_TWILIO_*).')}>Continue with phone + OTP {authStatus.smsConfigured ? '' : '(coming soon — credentials needed)'}</button>
+          <button className="primary" onClick={doAuth}>{authMode === 'signup' ? 'Create profile' : 'Sign in'}</button>
+          {authStatus.googleConfigured ? (
+            <div ref={googleBtnRef} />
+          ) : (
+            <button className="ghost" disabled>Continue with Google (coming soon — credentials needed)</button>
+          )}
+          <p className="muted">Forgot your password? Password reset is currently disabled (phone OTP was removed). If you linked Google, sign in with Google above.</p>
           <p className="muted">Sessions last 30 days and can be revoked from Profile → Sign-in &amp; security.</p>
         </div>
       </div>
@@ -243,10 +295,8 @@ export default function App() {
           <h2>{me.displayName} (@{me.username})</h2>
           <p className="muted">{me.bio ?? ''}</p>
           <h3>Sign-in &amp; security</h3>
-          <p>Google: {authStatus.googleConfigured ? 'linked' : 'coming soon — credentials needed'}</p>
-          <p>Phone: {authStatus.smsConfigured ? 'linked' : 'coming soon — credentials needed'}</p>
-          <button className="ghost" onClick={() => alert('Google linking needs credentials — see .env.example.')}>Link Google</button>{' '}
-          <button className="ghost" onClick={() => alert('Phone linking needs SMS credentials — see .env.example.')}>Link phone</button>{' '}
+          <p>Google: {authLinks.hasGoogle ? `linked${me.email ? ` (${me.email})` : ''}` : authStatus.googleConfigured ? 'not linked' : 'coming soon — credentials needed'}</p>
+          {authStatus.googleConfigured && !authLinks.hasGoogle && <div ref={linkGoogleBtnRef} />}
           <button className="ghost" onClick={async () => { await revokeSession(); setMe(null); }}>Sign out / revoke session</button>
           <h3>Your posts</h3>
           {feed.filter((p) => p.authorId === me.id).map((p) => <div key={p.id} className="card">{p.caption}</div>)}
