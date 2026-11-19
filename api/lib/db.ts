@@ -28,14 +28,30 @@ export function isAdminEmail(email: string | null | undefined): boolean {
   return list.includes(email.toLowerCase());
 }
 
+/**
+ * Neon via the Vercel integration does NOT create DATABASE_URL — it
+ * creates POSTGRES_URL / POSTGRES_PRISMA_URL / POSTGRES_URL_NON_POOLING
+ * instead. Accept those as fallbacks, in that order, so the integration
+ * works without the user copying the secret by hand.
+ */
+export function getDatabaseUrl(): string {
+  return (
+    process.env.DATABASE_URL ??
+    process.env.POSTGRES_URL ??
+    process.env.POSTGRES_PRISMA_URL ??
+    process.env.POSTGRES_URL_NON_POOLING ??
+    ''
+  );
+}
+
 export function getSql(): Sql | null {
-  const url = process.env.DATABASE_URL ?? '';
+  const url = getDatabaseUrl();
   if (!url) return null;
   return neon(url);
 }
 
 export function dbConfigured(): boolean {
-  return Boolean(process.env.DATABASE_URL);
+  return Boolean(getDatabaseUrl());
 }
 
 export function hashToken(token: string): string {
