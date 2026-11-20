@@ -89,7 +89,7 @@ export default function MessagesView({
       <button className="ghost" onClick={() => setOpenId(null)}>← Back</button>
       {messages.map((m) => (
         <div key={m.id} style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-          <span style={{ flex: 1, background: m.senderId === me.id ? '#ec4899' : 'var(--surface)', color: m.senderId === me.id ? '#fff' : undefined, padding: '8px 12px', borderRadius: 12 }}>{m.body}</span>
+          <span style={{ flex: 1, background: m.senderId === me.id ? 'var(--accent)' : 'var(--surface)', color: m.senderId === me.id ? '#fff' : undefined, padding: '8px 12px', borderRadius: 12 }}>{m.body}</span>
           {m.senderId === me.id && (
             <button className="ghost" onClick={async () => { await deleteMessage(m.id); setMessages(await listMessages(openId)); }}>Delete</button>
           )}

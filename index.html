@@ -13,6 +13,17 @@
     <title>DROP</title>
   </head>
   <body>
+    <!-- Apply the saved theme before first paint so dark-theme users
+         never see a light flash on load (React's effect runs later). -->
+    <script>
+      try {
+        if (localStorage.getItem('drop-theme') === 'dark') {
+          document.body.classList.add('dark');
+          var m = document.querySelector('meta[name="theme-color"]');
+          if (m) m.setAttribute('content', '#080d20');
+        }
+      } catch (e) {}
+    </script>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

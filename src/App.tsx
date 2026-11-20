@@ -22,7 +22,7 @@ import PostCard from './components/PostCard';
 import DropHub from './components/DropHub';
 import MessagesView from './components/MessagesView';
 import { ReelsView, ClubroomsView, SearchView, NotificationsView, SavedView } from './components/OtherViews';
-import { IconBell, IconPlus, IconHome, IconReels, IconDrop, IconSearch, IconProfile, IconMessages, IconGrid, IconCalendar, IconLayers, IconFire, IconChevronRight, LogoDrop } from './components/icons';
+import { IconBell, IconPlus, IconHome, IconReels, IconDrop, IconSearch, IconProfile, IconMessages, IconGrid, IconCalendar, IconLayers, IconFire, IconChevronRight, IconSun, IconMoon, LogoDrop } from './components/icons';
 import type { IconProps } from './components/icons';
 import type { ComponentType } from 'react';
 
@@ -92,8 +92,15 @@ export default function App() {
 
   useEffect(() => {
     document.body.classList.toggle('dark', dark);
+    // Home is always dark: the body class keeps the page margins navy
+    // in light theme so no white frame leaks around the dark Home column.
+    document.body.classList.toggle('home-view', view === 'home');
     localStorage.setItem('drop-theme', dark ? 'dark' : 'white');
-  }, [dark]);
+    // Browser chrome colour follows the visible screen: Home is always
+    // dark navy; other screens follow the active theme.
+    const meta = document.querySelector('meta[name="theme-color"]');
+    if (meta) meta.setAttribute('content', view === 'home' || dark ? '#080d20' : '#ffffff');
+  }, [dark, view]);
 
   const refresh = useCallback(async () => {
     setFeed(await listFeed());
@@ -401,10 +408,16 @@ export default function App() {
           <span className="logo-text">DROP®</span>
         </div>
         <div className="header-side">
-          <button className="ghost" onClick={() => setView('notifications')} aria-label="Notifications">
+          <button className="ghost header-icon-btn" onClick={() => setView('notifications')} aria-label="Notifications">
             <span className="bell-wrap"><IconBell size={20} />{unread > 0 && <span className="bell-dot" aria-hidden="true" />}</span>
           </button>
-          <button className="ghost" onClick={() => setDark((d) => !d)}>{dark ? 'White' : 'Dark'}</button>
+          {/* Theme toggle — compact 36px icon-only button. The icon shows
+              the CURRENT theme (moon = dark active, sun = light active);
+              the old "White"/"Dark" text label named the target theme and
+              actively misled (image-56 vs image-57). */}
+          <button className="ghost header-icon-btn" onClick={() => setDark((d) => !d)} aria-label={dark ? 'Switch to light theme' : 'Switch to dark theme'}>
+            {dark ? <IconMoon size={20} /> : <IconSun size={20} />}
+          </button>
         </div>
       </header>
 
@@ -591,7 +604,7 @@ export default function App() {
           one floating 52x288px capsule, 6 destinations, no reserved
           layout space, no bottom nav, no desktop rail. Full-screen
           Story/Blast viewers (z-index 100) still cover the dock by design. */}
-      <div className={dockSide === 'left' ? 'dock-panel dock-left' : 'dock-panel'} style={dockSide === 'left' ? { left: 12, right: 'auto' } : undefined}>
+      <div className={dockSide === 'left' ? 'dock-panel dock-left' : 'dock-panel'}>
         {renderDockButtons()}
       </div>
     </div>

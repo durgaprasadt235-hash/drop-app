@@ -47,6 +47,20 @@
   --space-8: 32px;
 }
 
+/* Dark theme — the palette variables are redefined under body.dark, so
+   every var(--bg)/var(--text)/var(--muted)/var(--border)/var(--surface)
+   use in the app follows the active theme automatically. Previously
+   these were defined once (light values) and never redefined, so
+   Settings card borders, tab/label colours, toggle off-states and
+   message bubbles stayed light in dark theme. */
+body.dark {
+  --bg: #080d20;
+  --text: #ffffff;
+  --muted: #a5adc2;
+  --border: #1f2a44;
+  --surface: #10172c;
+}
+
 * { box-sizing: border-box; }
 
 html, body, #root { margin: 0; padding: 0; min-height: 100%; }
@@ -145,6 +159,11 @@ button.ghost { background: transparent; border: 1px solid var(--border); border-
 .logo-text { font-size: 22px; line-height: 26px; font-weight: 750; letter-spacing: 0.08em; text-transform: uppercase; color: inherit; white-space: nowrap; }
 /* Header icon buttons (bell, messages, search) — plain round buttons. */
 .icon-btn { background: transparent; border: none; color: inherit; min-width: 44px; min-height: 44px; display: inline-flex; align-items: center; justify-content: center; border-radius: 50%; padding: 0; }
+/* Compact header icon button — 36px, for the bell and the theme toggle
+   in the header (same compact size as the Clubs button). Placed after
+   .ghost so it wins on min-height/padding at equal specificity. */
+.header-icon-btn { min-width: 36px; min-height: 36px; padding: 6px; }
+.header-icon-btn svg { width: 20px; height: 20px; }
 .bell-wrap { position: relative; display: inline-flex; align-items: center; justify-content: center; }
 /* 8px red dot, top-right of the bell. Styled only — the TSX renders this
    element only when there is an unread notification; never forced visible. */
@@ -217,13 +236,16 @@ button.ghost { background: transparent; border: 1px solid var(--border); border-
   position: fixed; z-index: 50; width: 52px; height: 288px;
   right: 12px; bottom: calc(20px + env(safe-area-inset-bottom, 0px));
   border-radius: 26px;
-  background: rgba(8, 13, 32, 0.45);
+  background: rgba(8, 13, 32, 0.85);
   backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
   border: 1px solid rgba(255, 255, 255, 0.25);
   box-shadow: 0 8px 24px rgba(8, 13, 32, 0.25);
   display: flex; flex-direction: column; align-items: center; justify-content: space-evenly;
   color: #fff;
 }
+/* Docked left — the TSX no longer sets an inline left offset; the
+   column-relative values live in the breakpoint rules below. */
+.dock-panel.dock-left { left: 12px; right: auto; }
 .dock-panel button, .dock-panel .dock-item { position: relative; background: none; border: none; min-width: 44px; min-height: 44px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; padding: 0; color: #fff; }
 /* Active icon sits inside a PURPLE GRADIENT RING (gradient-border
    technique, same as the story rings). The old rose-dot treatment is
@@ -264,7 +286,6 @@ button.ghost { background: transparent; border: 1px solid var(--border); border-
    with this rule and no override flag is needed. */
 .profile-page .profile-avatar-wrap .avatar { width: 76px; height: 76px; font-size: 25px; }
 .profile-avatar-wrap .avatar { border: 4px solid var(--bg); }
-body.dark .profile-avatar-wrap .avatar { border-color: var(--dark-bg); }
 .profile-stats { display: flex; margin: 16px 0; gap: 16px; }
 .profile-stats button { flex: 1; background: none; border: none; display: flex; flex-direction: column; align-items: center; gap: 2px; color: inherit; min-height: 44px; }
 .profile-stats button strong { font-size: 15px; line-height: 20px; font-weight: 650; }
@@ -301,7 +322,6 @@ body.dark .profile-avatar-wrap .avatar { border-color: var(--dark-bg); }
 /* Profile detail viewer (post / Reel / Drop) */
 .profile-modal { position: fixed; inset: 0; z-index: 60; background: rgba(0, 0, 0, 0.6); display: flex; align-items: flex-end; justify-content: center; }
 .profile-modal-card { background: var(--bg); color: var(--text); width: 100%; max-width: 680px; max-height: 88vh; overflow-y: auto; border-radius: 16px 16px 0 0; padding: 16px; }
-body.dark .profile-modal-card { background: var(--dark-bg); color: var(--dark-text); }
 /* Followers / Following sheet rows */
 .profile-user-row { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--border); }
 .profile-user-row .who { flex: 1; min-width: 0; }
@@ -315,42 +335,43 @@ body.dark .notice { background: #3a2f10; }
 .filter-strip button.active { border-color: var(--accent); color: var(--accent); }
 
 /* ---------- Home — dark glass (Home ONLY) ----------
-   Coordination hook: the TSX worker puts class "home" on the Home view
-   container (e.g. <div className="app home"> when view === 'home').
-   The :has(.logo-mark) selectors below are a fallback so the dark
-   treatment also attaches as soon as the new logo lockup renders.
-   Other screens keep the clean-luxury system untouched. */
+   Home is ALWAYS dark (approved Option B). The TSX puts class "home" on
+   the Home view container and "home-view" on <body> (see the theme
+   effect in App.tsx). The old `.header:has(.logo-mark)` fallback is
+   deleted: it fired on every signed-in page (the logo renders in the
+   header everywhere), which bled the dark-glass header onto light
+   non-Home pages. Non-Home headers now use the base theme-scoped
+   .header. */
 .home { background: #080d20; }
+/* Dark body margins on Home — without this, light theme shows white
+   body margins around the dark Home column at any width. */
+body.home-view { background: #080d20; }
 .home .header,
-.header:has(.logo-mark),
-body.dark .home .header,
-body.dark .header:has(.logo-mark) {
+body.dark .home .header {
   background: linear-gradient(to bottom, rgba(8, 13, 32, 0.6), rgba(8, 13, 32, 0));
   border-bottom-color: transparent;
   color: #fff;
 }
-.home .logo-text,
-.header:has(.logo-mark) .logo-text { color: #fff; }
+.home .logo-text { color: #fff; }
+/* Home-scoped primary buttons — white-on-navy in BOTH themes. The base
+   primary is ink-black, which is near-invisible on the dark Home in
+   light theme; in dark theme the body.dark rule already inverts it. */
+.home button.primary { background: #ffffff; color: var(--ink); }
 .home .header .icon-btn { color: #fff; }
 .home .header button.ghost { color: #fff; border-color: rgba(255, 255, 255, 0.35); background: transparent; }
 
-/* ---------- Dark theme (structure unchanged) ---------- */
-body.dark { background: var(--dark-bg); color: var(--dark-text); }
-body.dark .card, body.dark .pill-bar, body.dark .header { background: var(--dark-bg); color: var(--dark-text); border-color: var(--dark-border); }
-body.dark .muted { color: var(--dark-muted); }
-body.dark h3 { color: var(--dark-muted); }
-body.dark .dock-label { color: var(--dark-muted); }
-body.dark .dock-panel .dock-label { background: rgba(8, 13, 32, 0.85); border-color: rgba(255, 255, 255, 0.25); color: #fff; }
-body.dark input, body.dark textarea { background: #10172c; color: #fff; border-color: var(--dark-border); }
+/* ---------- Dark theme ----------
+   The tokens are redefined under body.dark (block after :root), so
+   var(--bg)/var(--text)/var(--muted)/var(--border)/var(--surface)
+   follow the active theme automatically. The old overrides below were
+   restating those same token values — or, worse, actively breaking the
+   theme: `body.dark .pill-bar` painted the glass shortcut pill solid
+   navy in dark theme, and `body.dark .pill-bar button.active` did the
+   same to the active shortcut. Only rules that set genuinely different
+   values remain. */
+body.dark input, body.dark textarea { background: var(--surface); color: var(--text); border-color: var(--border); }
 body.dark button.primary { background: #ffffff; color: var(--ink); }
-body.dark .avatar { background: #ffffff; color: var(--ink); border: 1px solid var(--dark-border); }
-body.dark .profile-cover, body.dark .profile-tile { background: #10172c; color: var(--dark-text); }
-body.dark .pill-bar button.active { background: #10172c; }
-body.dark .filter-strip button { background: #10172c; }
-body.dark .dock-panel { background: rgba(8, 13, 32, 0.45); border-color: rgba(255, 255, 255, 0.25); }
-body.dark .dock-icon { color: #fff; }
-body.dark .dock-panel button.active .dock-icon, body.dark .dock-panel .dock-item.active .dock-icon { color: #fff; }
-body.dark .dock-badge { border-color: rgba(8, 13, 32, 0.6); }
+body.dark .avatar { background: #ffffff; color: var(--ink); border: 1px solid var(--border); }
 
 /* ---------- Responsive breakpoints ---------- */
 /* Phone (<=640px): single 100% column, 16px gutters, header 56px.
@@ -387,6 +408,10 @@ body.dark .dock-badge { border-color: rgba(8, 13, 32, 0.6); }
 /* Tablet (641–1024px): content column max-width 600px centred, 24px gutters. */
 @media (min-width: 641px) {
   .app { max-width: 600px; }
+  /* Dock sits against the 600px content column, not the viewport edge,
+     so it never floats on the body margin at tablet width. */
+  .dock-panel { right: max(12px, calc((100vw - 600px) / 2 + 12px)); }
+  .dock-panel.dock-left { left: max(12px, calc((100vw - 600px) / 2 + 12px)); }
   .header { padding: 0 24px; }
   .stories { padding: 12px 24px; }
   .card { padding: 16px 24px; }
@@ -401,6 +426,12 @@ body.dark .dock-badge { border-color: rgba(8, 13, 32, 0.6); }
    Wordmark 24px, profile display name 18px, stats 16px at this width. */
 @media (min-width: 1025px) {
   .app { max-width: 720px; }
+  /* Dock sits against the 720px content column, not the viewport edge.
+     (On Profile pages the column widens to 900px, so the dock sits
+     ~90px inside that column's edge — still inside the app, overlaying
+     content, per the directive.) */
+  .dock-panel { right: max(12px, calc((100vw - 720px) / 2 + 12px)); }
+  .dock-panel.dock-left { left: max(12px, calc((100vw - 720px) / 2 + 12px)); }
   .app:has(.profile-page) { max-width: 900px; }
   h1, .logo { font-size: 24px; line-height: 28px; }
   .logo-text { font-size: 24px; line-height: 28px; }
