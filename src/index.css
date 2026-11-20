@@ -149,8 +149,9 @@ button.ghost { background: transparent; border: 1px solid var(--border); border-
 .header-side.right { justify-content: flex-end; }
 .header-side:first-child { justify-content: flex-start; }
 .header-side:last-child { justify-content: flex-end; }
-/* Clubs — compact ghost button: 20px grid icon, 12px label. */
-.clubs-btn { display: inline-flex; align-items: center; gap: 6px; padding: 6px 10px; min-height: 36px; font-size: 12px; line-height: 18px; font-weight: 600; }
+/* Clubs — bare button, no box around it (Instagram-style): 20px grid
+   icon, 12px label. The old .ghost border is gone — see App.tsx. */
+.clubs-btn { display: inline-flex; align-items: center; gap: 6px; padding: 6px 10px; min-height: 36px; font-size: 12px; line-height: 18px; font-weight: 600; background: transparent; border: none; color: inherit; }
 /* Logo lockup — gradient droplet mark + Inter 700 letterspaced wordmark. */
 .logo { margin: 0; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px; justify-self: center; }
 .logo span { color: inherit; }
@@ -160,9 +161,10 @@ button.ghost { background: transparent; border: 1px solid var(--border); border-
 /* Header icon buttons (bell, messages, search) — plain round buttons. */
 .icon-btn { background: transparent; border: none; color: inherit; min-width: 44px; min-height: 44px; display: inline-flex; align-items: center; justify-content: center; border-radius: 50%; padding: 0; }
 /* Compact header icon button — 36px, for the bell and the theme toggle
-   in the header (same compact size as the Clubs button). Placed after
+   in the header (same compact size as the Clubs button). Bare, no box
+   around it (the old .ghost border is gone — see App.tsx). Placed after
    .ghost so it wins on min-height/padding at equal specificity. */
-.header-icon-btn { min-width: 36px; min-height: 36px; padding: 6px; }
+.header-icon-btn { min-width: 36px; min-height: 36px; padding: 6px; background: transparent; border: none; color: inherit; }
 .header-icon-btn svg { width: 20px; height: 20px; }
 .bell-wrap { position: relative; display: inline-flex; align-items: center; justify-content: center; }
 /* 8px red dot, top-right of the bell. Styled only — the TSX renders this
@@ -173,24 +175,36 @@ button.ghost { background: transparent; border: 1px solid var(--border); border-
 /* Story circles — 54px, gradient ring on EVERY circle including the +
    add circle. Gradient-border technique: the gradient is the border-box
    layer, the inner disc is the padding-box layer, so the ring itself is
-   the gradient and the photo/initial shows inside it. */
+   the gradient and the photo/initial shows inside it. The disc follows
+   the theme (light surface / dark navy surface) — the gradient ring
+   itself is untouched. */
 .story-item { flex: 0 0 auto; width: 54px; display: flex; flex-direction: column; align-items: center; gap: 4px; min-width: 0; }
-.story-circle { flex: 0 0 auto; width: 54px; height: 54px; border-radius: 50%; border: 3px solid transparent; background: linear-gradient(rgba(8, 13, 32, 0.45), rgba(8, 13, 32, 0.45)) padding-box, var(--drop-gradient) border-box; display: flex; align-items: center; justify-content: center; font-size: 18px; color: #fff; }
-.story-username { font-size: 10px; line-height: 13px; font-weight: 400; color: #fff; text-align: center; max-width: 54px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.story-circle { flex: 0 0 auto; width: 54px; height: 54px; border-radius: 50%; border: 3px solid transparent; background: linear-gradient(var(--surface), var(--surface)) padding-box, var(--drop-gradient) border-box; display: flex; align-items: center; justify-content: center; font-size: 18px; color: var(--text); }
+.story-username { font-size: 10px; line-height: 13px; font-weight: 400; color: var(--text); text-align: center; max-width: 54px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .story-circle img { width: 100%; height: 100%; object-fit: cover; border-radius: 50%; display: block; }
-.story-circle.yours { border: 3px solid transparent; background: linear-gradient(rgba(8, 13, 32, 0.45), rgba(8, 13, 32, 0.45)) padding-box, var(--drop-gradient) border-box; }
-/* Glass shortcut pill — translucent white blur over the photo, icon
-   stacked above its label, chevron at the right end. */
-.pill-bar { display: flex; align-items: stretch; height: 46px; background: rgba(255, 255, 255, 0.16); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px); border: 1px solid rgba(255, 255, 255, 0.35); border-radius: 23px; margin: 8px 16px; overflow: hidden; color: #fff; }
-.pill-bar button { flex: 1; border: none; background: transparent; color: #fff; }
-.pill-item { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; padding: 6px 4px; color: #fff; }
-.pill-item + .pill-item { border-left: 1px solid rgba(255, 255, 255, 0.25); }
-.pill-icon { width: 16px; height: 16px; display: flex; align-items: center; justify-content: center; color: #fff; }
+/* Shortcut pill — same 46px segmented pill, icon stacked above its
+   label, chevron at the right end. It follows the theme: light surface
+   with hairline border in light, translucent white glass in dark.
+   NO highlighted segment: the active shortcut is ink/white text only,
+   inactive shortcuts are muted — no background block anywhere. */
+.pill-bar { display: flex; align-items: stretch; height: 46px; background: var(--surface); border: 1px solid var(--hairline); border-radius: 23px; margin: 8px 16px; overflow: hidden; color: var(--text); }
+.pill-bar button { flex: 1; border: none; background: transparent; color: inherit; }
+.pill-item { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; padding: 6px 4px; }
+/* Higher specificity than `.pill-bar button { color: inherit }` so the
+   muted/active text colours actually win on the button itself. */
+.pill-bar button.pill-item { color: var(--muted); }
+.pill-bar button.pill-item.active { color: var(--text); }
+.pill-item + .pill-item { border-left: 1px solid var(--hairline); }
+.pill-icon { width: 16px; height: 16px; display: flex; align-items: center; justify-content: center; color: inherit; }
 .pill-icon svg { width: 16px; height: 16px; }
-.pill-label { font-size: 11px; line-height: 15px; font-weight: 550; color: #fff; white-space: nowrap; }
-/* Active shortcut stays legible: a brighter glass, white text. */
-.pill-bar button.active, .pill-item.active { background: rgba(255, 255, 255, 0.28); color: #fff; }
-.pill-chevron { flex: 0 0 auto; display: flex; align-items: center; justify-content: center; padding: 0 14px 0 8px; color: #fff; background: transparent; border: none; border-left: 1px solid rgba(255, 255, 255, 0.25); }
+.pill-label { font-size: 11px; line-height: 15px; font-weight: 550; color: inherit; white-space: nowrap; }
+.pill-chevron { flex: 0 0 auto; display: flex; align-items: center; justify-content: center; padding: 0 14px 0 8px; color: var(--muted); background: transparent; border: none; border-left: 1px solid var(--hairline); }
+/* Dark theme — the glass pill, as before. */
+body.dark .pill-bar { background: rgba(255, 255, 255, 0.16); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px); border-color: rgba(255, 255, 255, 0.35); color: #fff; }
+body.dark .pill-bar button.pill-item { color: rgba(255, 255, 255, 0.6); }
+body.dark .pill-bar button.pill-item.active { color: #fff; }
+body.dark .pill-item + .pill-item, body.dark .pill-chevron { border-left-color: rgba(255, 255, 255, 0.25); }
+body.dark .pill-chevron { color: rgba(255, 255, 255, 0.8); }
 .card { border-bottom: 1px solid var(--border); border-radius: 12px; padding: 16px; }
 /* Home — one compact Create Post action (replaces the three outlined
    +Post / +Story / +Drop buttons; Story/Drop creation still live via
@@ -200,7 +214,7 @@ button.ghost { background: transparent; border: 1px solid var(--border); border-
 /* Home — genuine empty state, centred in the feed, compact text + one
    small Create Post button. */
 .home-empty { text-align: center; padding: 32px 16px; }
-.home-empty p { font-size: 12px; line-height: 18px; font-weight: 400; color: rgba(255, 255, 255, 0.75); margin: 0 0 12px; }
+.home-empty p { font-size: 12px; line-height: 18px; font-weight: 400; color: var(--muted); margin: 0 0 12px; }
 .home-empty button { min-height: 34px; padding: 8px 16px; font-size: 12px; line-height: 18px; font-weight: 600; border-radius: 9px; }
 .avatar { width: 40px; height: 40px; border-radius: 50%; background: var(--ink); color: #fff; display: inline-flex; align-items: center; justify-content: center; font-weight: 700; }
 .post-media { width: 100%; aspect-ratio: 4 / 3; border-radius: 12px; display: flex; align-items: center; justify-content: center; font-size: 48px; background: var(--surface); margin: 10px 0; }
@@ -211,7 +225,7 @@ button.ghost { background: transparent; border: 1px solid var(--border); border-
 /* ---------- Home — full-bleed feed (PostCard) ---------- */
 /* Edge-to-edge, no card chrome, no white background, no border/radius. */
 .post-card.fullbleed { border: none; border-radius: 0; padding: 0; margin: 0; background: transparent; }
-.post-media-wrap { position: relative; width: 100%; background: var(--dark-bg); }
+.post-media-wrap { position: relative; width: 100%; background: var(--surface); }
 .post-media-img { width: 100%; display: block; object-fit: cover; }
 /* Bottom overlay — dark gradient from transparent to deep navy so the
    white creator row, caption and engagement row stay legible. */
@@ -226,27 +240,39 @@ button.ghost { background: transparent; border: 1px solid var(--border); border-
 .post-engagement { display: flex; gap: 16px; align-items: center; margin-top: 12px; color: #fff; }
 .post-engagement button { background: none; border: none; color: #fff; font-size: 12px; line-height: 22px; font-weight: 600; display: inline-flex; align-items: center; gap: 6px; padding: 0; min-height: 44px; }
 .post-engagement .fire-on { color: var(--fire); }
-/* Text-only posts — an honest solid deep-navy panel, NOT a fake photo
+/* Text-only posts — an honest solid theme panel, NOT a fake photo
    and NOT a placeholder image. Text displays cleanly at a comfortable
    height. */
-.post-text-panel { background: #080d20; color: #fff; min-height: 220px; display: flex; align-items: center; justify-content: center; text-align: center; padding: 48px 20px; font-size: 17px; line-height: 26px; font-weight: 500; }
+.post-text-panel { background: var(--bg); color: var(--text); min-height: 220px; display: flex; align-items: center; justify-content: center; text-align: center; padding: 48px 20px; font-size: 17px; line-height: 26px; font-weight: 500; }
+/* Text-only posts — the overlay sits on the light panel, not on a
+   photo, so it is transparent with ink text (no dark band). Over a
+   real photo the dark gradient overlay above is unchanged. */
+.post-overlay-text { background: none; color: var(--text); }
+.post-overlay-text .post-username, .post-overlay-text .post-caption { color: var(--text); }
+.post-overlay-text .post-time { color: var(--muted); }
+.post-overlay-text .post-engagement button { color: var(--text); }
+.post-overlay-text .post-creator-row button { background: transparent; border-color: var(--border); color: var(--text); }
+.post-overlay-text .post-creator-row .avatar { border-color: var(--border); }
+.post-time { color: rgba(255, 255, 255, 0.75); }
 
 /* ---------- Dock — vertical GLASS pill (global, Home-approved) ---------- */
 .dock-panel {
   position: fixed; z-index: 50; width: 52px; height: 288px;
   right: 12px; bottom: calc(20px + env(safe-area-inset-bottom, 0px));
   border-radius: 26px;
-  background: rgba(8, 13, 32, 0.85);
+  background: rgba(255, 255, 255, 0.92);
   backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
-  border: 1px solid rgba(255, 255, 255, 0.25);
-  box-shadow: 0 8px 24px rgba(8, 13, 32, 0.25);
+  border: 1px solid var(--hairline);
+  box-shadow: 0 8px 24px rgba(11, 19, 39, 0.12);
   display: flex; flex-direction: column; align-items: center; justify-content: space-evenly;
-  color: #fff;
+  color: var(--text);
 }
+/* Dark theme — the dark navy glass capsule, as before. */
+body.dark .dock-panel { background: rgba(8, 13, 32, 0.85); border-color: rgba(255, 255, 255, 0.25); box-shadow: 0 8px 24px rgba(8, 13, 32, 0.25); color: #fff; }
 /* Docked left — the TSX no longer sets an inline left offset; the
    column-relative values live in the breakpoint rules below. */
 .dock-panel.dock-left { left: 12px; right: auto; }
-.dock-panel button, .dock-panel .dock-item { position: relative; background: none; border: none; min-width: 44px; min-height: 44px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; padding: 0; color: #fff; }
+.dock-panel button, .dock-panel .dock-item { position: relative; background: none; border: none; min-width: 44px; min-height: 44px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; padding: 0; color: var(--text); }
 /* Active icon sits inside a PURPLE GRADIENT RING (gradient-border
    technique, same as the story rings). The old rose-dot treatment is
    gone. The 300ms magnification is transform-based in TSX and untouched. */
@@ -256,11 +282,11 @@ button.ghost { background: transparent; border: 1px solid var(--border); border-
   border-radius: 50%; border: 2px solid transparent;
   background: linear-gradient(rgba(8, 13, 32, 0), rgba(8, 13, 32, 0)) padding-box, var(--drop-ring) border-box;
 }
-.dock-icon { width: 20px; height: 20px; color: #fff; }
-.dock-panel button.active .dock-icon, .dock-panel .dock-item.active .dock-icon { color: #fff; }
+.dock-icon { width: 20px; height: 20px; color: var(--text); }
+.dock-panel button.active .dock-icon, .dock-panel .dock-item.active .dock-icon { color: var(--text); }
 .dock-badge {
   position: absolute; top: 6px; right: 6px; width: 8px; height: 8px;
-  border-radius: 50%; background: var(--accent); border: 2px solid rgba(8, 13, 32, 0.6);
+  border-radius: 50%; background: var(--accent); border: 2px solid var(--bg);
 }
 .dock-label { font-size: 10px; line-height: 12px; font-weight: 600; color: #fff; text-align: center; }
 /* Panel label sits BESIDE its icon (outside the capsule), not beneath
@@ -334,31 +360,25 @@ body.dark .notice { background: #3a2f10; }
 .filter-strip button { flex: 0 0 auto; border: 1px solid var(--border); background: var(--surface); border-radius: 10px; padding: 8px 12px; }
 .filter-strip button.active { border-color: var(--accent); color: var(--accent); }
 
-/* ---------- Home — dark glass (Home ONLY) ----------
-   Home is ALWAYS dark (approved Option B). The TSX puts class "home" on
-   the Home view container and "home-view" on <body> (see the theme
-   effect in App.tsx). The old `.header:has(.logo-mark)` fallback is
-   deleted: it fired on every signed-in page (the logo renders in the
-   header everywhere), which bled the dark-glass header onto light
-   non-Home pages. Non-Home headers now use the base theme-scoped
-   .header. */
-.home { background: #080d20; }
-/* Dark body margins on Home — without this, light theme shows white
-   body margins around the dark Home column at any width. */
-body.home-view { background: #080d20; }
-.home .header,
+/* ---------- Home — theme-following (light by default) ----------
+   Home used to be hardcoded dark (the approved Option B reference was
+   a dark full-bleed screen): `.home { background: #080d20 }`, a
+   body.home-view rule forcing dark body margins, a dark-glass header,
+   white Home buttons and white story/pill/empty-state text in BOTH
+   themes — so the toggle only ever themed the shell around Home.
+   Home now follows the active theme like every other page: white
+   with black text in light (the default), dark navy in dark. The
+   logo gradient, story gradient rings, dock active gradient ring,
+   Inter type scale, sizes and all layouts are untouched — only
+   colours follow the theme. The one dark-only remainder is the glass
+   header over the full-bleed feed in dark theme (below); in light
+   theme Home uses the base white header. The `home` class stays on
+   the Home container in App.tsx for this rule. */
 body.dark .home .header {
   background: linear-gradient(to bottom, rgba(8, 13, 32, 0.6), rgba(8, 13, 32, 0));
   border-bottom-color: transparent;
   color: #fff;
 }
-.home .logo-text { color: #fff; }
-/* Home-scoped primary buttons — white-on-navy in BOTH themes. The base
-   primary is ink-black, which is near-invisible on the dark Home in
-   light theme; in dark theme the body.dark rule already inverts it. */
-.home button.primary { background: #ffffff; color: var(--ink); }
-.home .header .icon-btn { color: #fff; }
-.home .header button.ghost { color: #fff; border-color: rgba(255, 255, 255, 0.35); background: transparent; }
 
 /* ---------- Dark theme ----------
    The tokens are redefined under body.dark (block after :root), so

@@ -11,7 +11,7 @@ import { IconComment, IconFire, IconMore, IconSave, IconSend, IconShare } from '
 // creator row with Follow, Poll / Questions / Slider widgets.
 // Media honesty: only a genuine media URL ever renders as an <img>.
 // 'reel-media' and any other placeholder/sentinel is NOT a real URL.
-// Posts without real media get a solid dark text panel, never a fake photo.
+// Posts without real media get a solid theme text panel, never a fake photo.
 
 /** A genuine media URL: http(s), blob:, or an inline data:image:. Anything
  *  else (e.g. the 'reel-media' sentinel) is a placeholder, not a photo. */
@@ -117,11 +117,11 @@ export default function PostCard({ post, onFollow, following }: {
         {showFire && <span style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', pointerEvents: 'none' }}><IconFire size={64} filled /></span>}
         {extras.poll && <div style={{ position: 'absolute', top: 8, left: 8, background: 'rgba(0,0,0,0.6)', color: '#fff', padding: '6px 10px', borderRadius: 8 }}>{extras.poll.question}</div>}
 
-        <div className="post-overlay">
+        <div className={hasRealMedia ? 'post-overlay' : 'post-overlay post-overlay-text'}>
           <div className="post-creator-row">
             <span className="avatar">{(post.author?.displayName ?? 'D')[0]}</span>
             <strong className="post-username" style={{ fontSize: 13, fontWeight: 600, lineHeight: 1.4 }}>{authorName}</strong>
-            {time && <span className="post-time" style={{ fontSize: 12, lineHeight: 1.4, color: 'rgba(255, 255, 255, 0.75)' }}>· {time}</span>}
+            {time && <span className="post-time" style={{ fontSize: 12, lineHeight: 1.4 }}>· {time}</span>}
             <button className="ghost" onClick={() => onFollow(post.authorId)}>{following ? 'Following' : 'Follow'}</button>
           </div>
           <p className="post-caption" style={{ fontSize: 13, lineHeight: 1.4 }}>{post.caption}</p>

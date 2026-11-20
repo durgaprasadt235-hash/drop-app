@@ -92,15 +92,12 @@ export default function App() {
 
   useEffect(() => {
     document.body.classList.toggle('dark', dark);
-    // Home is always dark: the body class keeps the page margins navy
-    // in light theme so no white frame leaks around the dark Home column.
-    document.body.classList.toggle('home-view', view === 'home');
     localStorage.setItem('drop-theme', dark ? 'dark' : 'white');
-    // Browser chrome colour follows the visible screen: Home is always
-    // dark navy; other screens follow the active theme.
+    // Browser chrome colour follows the active theme (Home follows the
+    // theme too now — no more always-dark Home, no home-view class).
     const meta = document.querySelector('meta[name="theme-color"]');
-    if (meta) meta.setAttribute('content', view === 'home' || dark ? '#080d20' : '#ffffff');
-  }, [dark, view]);
+    if (meta) meta.setAttribute('content', dark ? '#080d20' : '#ffffff');
+  }, [dark]);
 
   const refresh = useCallback(async () => {
     setFeed(await listFeed());
@@ -401,21 +398,21 @@ export default function App() {
     <div className={view === 'home' ? 'app home' : 'app'}>
       <header className="header">
         <div className="header-side">
-          <button className="ghost clubs-btn" onClick={() => setView('clubrooms')}><IconGrid size={20} />Clubs</button>
+          <button className="clubs-btn" onClick={() => setView('clubrooms')}><IconGrid size={20} />Clubs</button>
         </div>
         <div className="logo" onClick={() => setView('home')}>
           <span className="logo-mark"><LogoDrop size={28} /></span>
           <span className="logo-text">DROP®</span>
         </div>
         <div className="header-side">
-          <button className="ghost header-icon-btn" onClick={() => setView('notifications')} aria-label="Notifications">
+          <button className="header-icon-btn" onClick={() => setView('notifications')} aria-label="Notifications">
             <span className="bell-wrap"><IconBell size={20} />{unread > 0 && <span className="bell-dot" aria-hidden="true" />}</span>
           </button>
           {/* Theme toggle — compact 36px icon-only button. The icon shows
               the CURRENT theme (moon = dark active, sun = light active);
               the old "White"/"Dark" text label named the target theme and
               actively misled (image-56 vs image-57). */}
-          <button className="ghost header-icon-btn" onClick={() => setDark((d) => !d)} aria-label={dark ? 'Switch to light theme' : 'Switch to dark theme'}>
+          <button className="header-icon-btn" onClick={() => setDark((d) => !d)} aria-label={dark ? 'Switch to light theme' : 'Switch to dark theme'}>
             {dark ? <IconMoon size={20} /> : <IconSun size={20} />}
           </button>
         </div>
